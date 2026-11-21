@@ -182,6 +182,8 @@
   var tripTextEl = document.getElementById('trip-text');
   var clearEl = document.getElementById('clear');
 
+  var MY_LOC = 'My location';
+  var hereEl = document.getElementById('here');
   var lastLatLng = null;       // latest GPS fix
   var fromPt = null;           // null = use my GPS position
   var toPt = null;
@@ -251,7 +253,7 @@
   function go() {
     var fromText = fromEl.value.trim();
     var toText = toEl.value.trim();
-    if (fromText && !fromPt) return search(fromText, pickFrom);
+    if (fromText && fromText !== MY_LOC && !fromPt) return search(fromText, pickFrom);
     if (!toText) { toEl.focus(); return; }
     if (!toPt) return search(toText, pickTo);
     var start = fromPt || lastLatLng;
@@ -260,6 +262,14 @@
     drawRoute(start, toPt, false);
   }
 
+  function useMyLocation() {
+    fromPt = null;
+    fromEl.value = MY_LOC;
+    resultsEl.innerHTML = '';
+    if (toPt) go();
+  }
+  hereEl.addEventListener('click', useMyLocation);
+  fromEl.addEventListener('focus', function () { if (fromEl.value === MY_LOC) fromEl.select(); });
   fromEl.addEventListener('input', function () { fromPt = null; });
   toEl.addEventListener('input', function () { toPt = null; });
   goEl.addEventListener('click', go);
@@ -324,7 +334,7 @@
   clearEl.addEventListener('click', function () {
     clearRoute();
     toPt = null; toEl.value = '';
-    fromPt = null; fromEl.value = '';
+    fromPt = null; fromEl.value = MY_LOC;
   });
 
   function checkRoute(lat, lon) {

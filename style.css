@@ -50,6 +50,7 @@ html, body {
   background: #2563eb;
   color: #fff;
 }
+.bar .icon-btn { padding: 0; width: 56px; background: #1e293b; font-size: 20px; }
 .pin { width: 14px; height: 14px; border-radius: 50%; flex: none; margin: 0 2px; }
 .pin.from { background: #2563eb; border: 3px solid #fff; }
 .pin.to { background: #dc2626; border: 3px solid #fff; }
