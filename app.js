@@ -258,8 +258,14 @@
   }
 
   // Nearest first. Looks within ~30 km of me, widens if nothing is found.
-  function search(text, onPick) {
+  function osmSearch(text, onPick, note) {
     resultsEl.innerHTML = '<div class="msg">Searching…</div>';
+    if (note) {
+      var nn = document.createElement('div');
+      nn.className = 'msg';
+      nn.textContent = note;
+      resultsEl.insertBefore(nn, resultsEl.firstChild);
+    }
     var first = lastLatLng ? nominatim(text, true) : nominatim(text, false);
     var widened = false;
     first
@@ -288,6 +294,80 @@
       });
   }
 
+  // ---------- Business search key (TomTom), stored on this phone only ----------
+  var KEY_NAME = 'yb-maps-tomtom-key';
+  function getKey() { try { return localStorage.getItem(KEY_NAME) || ''; } catch (e) { return ''; } }
+  function setKey(v) { try { if (v) localStorage.setItem(KEY_NAME, v); else localStorage.removeItem(KEY_NAME); } catch (e) {} }
+
+  function tomtom(text, onPick, key, idx) {
+    resultsEl.innerHTML = '<div class="msg">Searching…</div>';
+    function call(withRadius) {
+      var url = 'https://api.tomtom.com/search/2/search/' + encodeURIComponent(text) +
+                '.json?key=' + encodeURIComponent(key) + '&limit=10&language=en-GB';
+      if (idx) url += '&idxSet=' + idx;
+      if (lastLatLng) {
+        url += '&lat=' + lastLatLng.lat + '&lon=' + lastLatLng.lng;
+        if (withRadius) url += '&radius=60000';
+      }
+      return fetch(url).then(function (r) {
+        if (!r.ok) { var e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+        return r.json();
+      }).then(function (d) { return d.results || []; });
+    }
+    call(true)
+      .then(function (list) { return list.length || !lastLatLng ? list : call(false); })
+      .then(function (list) {
+        var out = list.map(function (r) {
+          var addr = (r.address && r.address.freeformAddress) || '';
+          var name = r.poi && r.poi.name;
+          return {
+            display_name: name ? name + ', ' + addr : addr,
+            lat: r.position.lat, lon: r.position.lon,
+            _dist: lastLatLng ? distM(lastLatLng.lat, lastLatLng.lng, r.position.lat, r.position.lon) : null
+          };
+        });
+        if (lastLatLng) out.sort(function (x, y) { return x._dist - y._dist; });
+        showResults(out.slice(0, 8), onPick);
+      })
+      .catch(function (err) {
+        var why = err && err.status === 403 || err && err.status === 401 ? 'key not accepted'
+                : err && err.status === 429 ? 'daily limit reached' : 'no connection';
+        osmSearch(text, onPick, 'Business search failed (' + why + '). Using free map data.');
+      });
+  }
+
+  function search(text, onPick, idx) {
+    var key = getKey();
+    if (key) return tomtom(text, onPick, key, idx);
+    osmSearch(text, onPick);
+  }
+
+  function showSettings() {
+    resultsEl.innerHTML = '';
+    var box = document.createElement('div');
+    box.className = 'settings';
+    var has = !!getKey();
+    box.innerHTML =
+      '<p class="state">Business search: ' + (has ? 'ON' : 'OFF') + '</p>' +
+      '<p>Finds shops and businesses like Google Maps. Get a free key at developer.tomtom.com, then paste it here. It stays on this phone.</p>' +
+      '<div class="srow"><input id="keyin" type="password" placeholder="Paste key" autocomplete="off">' +
+      '<button id="keysave" type="button">Save</button></div>' +
+      (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '');
+    resultsEl.appendChild(box);
+    document.getElementById('keysave').addEventListener('click', function () {
+      var v = document.getElementById('keyin').value.trim();
+      if (!v) return;
+      setKey(v);
+      resultsEl.innerHTML = '<div class="msg">Saved. Business search is on.</div>';
+    });
+    var off = document.getElementById('keyoff');
+    if (off) off.addEventListener('click', function () {
+      setKey('');
+      resultsEl.innerHTML = '<div class="msg">Removed. Using free map data.</div>';
+    });
+  }
+  document.getElementById('cog').addEventListener('click', showSettings);
+
   // Press and hold the map to drop a destination pin
   map.on('contextmenu', function (e) {
     toPt = e.latlng;
@@ -314,7 +394,7 @@
       c.addEventListener('click', function () {
         toEl.value = n[1];
         toPt = null;
-        search(n[1], pickTo);
+        search(n[1], pickTo, 'POI');
       });
       wrap.appendChild(c);
     });
