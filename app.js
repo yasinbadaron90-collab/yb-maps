@@ -354,7 +354,8 @@
       '<p>Finds shops and businesses like Google Maps. Get a free key at developer.tomtom.com, then paste it here. It stays on this phone.</p>' +
       '<div class="srow"><input id="keyin" type="password" placeholder="Paste key" autocomplete="off">' +
       '<button id="keysave" type="button">Save</button></div>' +
-      (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '');
+      (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
+      '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>';
     resultsEl.appendChild(box);
     document.getElementById('keysave').addEventListener('click', function () {
       var v = document.getElementById('keyin').value.trim();
@@ -362,6 +363,18 @@
       setKey(v);
       resultsEl.innerHTML = '<div class="msg">Saved. Business search is on.</div>';
       setTimeout(function () { if (!resultsEl.querySelector('.settings')) resultsEl.innerHTML = ''; }, 2500);
+    });
+    document.getElementById('refresh').addEventListener('click', function () {
+      this.textContent = 'Refreshing…';
+      var done = function () { location.reload(); };
+      var clear = function () {
+        if (!window.caches) return Promise.resolve();
+        return caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); });
+      };
+      var unreg = (navigator.serviceWorker && navigator.serviceWorker.getRegistrations)
+        ? navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
+        : Promise.resolve();
+      unreg.then(clear).then(done, done);
     });
     var off = document.getElementById('keyoff');
     if (off) off.addEventListener('click', function () {
