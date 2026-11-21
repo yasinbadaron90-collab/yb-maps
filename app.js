@@ -370,7 +370,8 @@
       '<div class="srow"><input id="keyin" type="password" placeholder="Paste key" autocomplete="off">' +
       '<button id="keysave" type="button">Save</button></div>' +
       (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
-      '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>';
+      '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 13</p>';
     resultsEl.appendChild(box);
     document.getElementById('keysave').addEventListener('click', function () {
       var v = document.getElementById('keyin').value.trim();
