@@ -413,6 +413,7 @@
   }
 
   function go() {
+    unlockSpeech();
     var fromText = fromEl.value.trim();
     var toText = toEl.value.trim();
     if (fromText && fromText !== MY_LOC && !fromPt) return search(fromText, pickFrom);
@@ -447,11 +448,164 @@
     return km + ' · ' + t;
   }
 
+
+  // ---------- Turn-by-turn ----------
+  var navEl = document.getElementById('nav');
+  var navIconEl = document.getElementById('nav-icon');
+  var navDistEl = document.getElementById('nav-dist');
+  var navTextEl = document.getElementById('nav-text');
+  var muteEl = document.getElementById('mute');
+  var MUTE_KEY = 'yb-maps-muted';
+  var muted = false;
+  try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch (e) {}
+  muteEl.textContent = muted ? '🔇' : '🔊';
+  var steps = null;     // [{type, modifier, name, lat, lon}] ; steps[0] = depart
+  var stepIdx = 1;
+  var said = {};        // which announcements were already spoken for stepIdx
+
+  function speak(text) {
+    if (muted || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en-ZA';
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+  function unlockSpeech() {   // phones only allow speech after a tap
+    if (!('speechSynthesis' in window)) return;
+    try { var u = new SpeechSynthesisUtterance(' '); u.volume = 0; window.speechSynthesis.speak(u); } catch (e) {}
+  }
+  muteEl.addEventListener('click', function () {
+    muted = !muted;
+    muteEl.textContent = muted ? '🔇' : '🔊';
+    try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch (e) {}
+    if (muted) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+    else { unlockSpeech(); speak('Voice on'); }
+  });
+
+  function turnWord(mod) {
+    switch (mod) {
+      case 'left': return 'left';
+      case 'right': return 'right';
+      case 'slight left': return 'slightly left';
+      case 'slight right': return 'slightly right';
+      case 'sharp left': return 'sharp left';
+      case 'sharp right': return 'sharp right';
+      case 'uturn': return 'around';
+      default: return '';
+    }
+  }
+  function turnIcon(st) {
+    if (st.type === 'arrive') return '⚑';
+    if (st.type === 'roundabout' || st.type === 'rotary' || st.type === 'roundabout turn') return '⟳';
+    switch (st.modifier) {
+      case 'left': return '←';
+      case 'right': return '→';
+      case 'slight left': return '↖';
+      case 'slight right': return '↗';
+      case 'sharp left': return '↰';
+      case 'sharp right': return '↱';
+      case 'uturn': return '↩';
+      default: return '↑';
+    }
+  }
+  // "turn left onto Main Road"
+  function stepPhrase(st) {
+    var onto = st.name ? ' onto ' + st.name : '';
+    var w = turnWord(st.modifier);
+    if (st.type === 'arrive') return 'You have arrived';
+    if (st.type === 'roundabout' || st.type === 'rotary') {
+      return 'Take the ' + (st.exit ? ordinal(st.exit) + ' exit' : 'exit') + ' at the roundabout' + onto;
+    }
+    if (st.type === 'fork') return 'Keep ' + (w || 'straight') + (st.name ? ' onto ' + st.name : '');
+    if (st.modifier === 'uturn') return 'Make a U-turn';
+    if (st.type === 'continue' || st.type === 'new name' || !w || st.modifier === 'straight') {
+      return 'Continue straight' + onto;
+    }
+    return 'Turn ' + w + onto;
+  }
+  function ordinal(n) {
+    return ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'][n] || (n + 'th');
+  }
+  function fmtDist(m) {
+    if (m >= 1000) return (m / 1000).toFixed(1) + ' km';
+    return (Math.round(m / 10) * 10) + ' m';
+  }
+  function spokenDist(m) {
+    return m >= 1000 ? (m / 1000).toFixed(1) + ' kilometres' : (Math.round(m / 10) * 10) + ' metres';
+  }
+
+  function navStart(rt) {
+    steps = null;
+    if (!routeFromGps || !rt.legs) { navEl.classList.add('hidden'); return; }
+    var list = [];
+    rt.legs.forEach(function (leg) {
+      (leg.steps || []).forEach(function (s) {
+        if (!s.maneuver || !s.maneuver.location) return;
+        list.push({
+          type: s.maneuver.type,
+          modifier: s.maneuver.modifier,
+          exit: s.maneuver.exit,
+          name: s.name || '',
+          lat: s.maneuver.location[1],
+          lon: s.maneuver.location[0]
+        });
+      });
+    });
+    if (list.length < 2) { navEl.classList.add('hidden'); return; }
+    steps = list;
+    stepIdx = 1;
+    said = {};
+    navEl.classList.remove('hidden');
+    navRender(null);
+    if (lastLatLng) navUpdate(lastLatLng.lat, lastLatLng.lng);
+  }
+  function navReset() {
+    steps = null;
+    navEl.classList.add('hidden');
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+  }
+  function navRender(d) {
+    var st = steps[stepIdx];
+    navIconEl.textContent = turnIcon(st);
+    navDistEl.textContent = d == null ? '' : (st.type === 'arrive' ? fmtDist(d) : fmtDist(d));
+    navTextEl.textContent = stepPhrase(st);
+  }
+  function navUpdate(lat, lon) {
+    if (!steps || stepIdx >= steps.length) return;
+    var st = steps[stepIdx];
+    var d = distM(lat, lon, st.lat, st.lon);
+    var isLast = st.type === 'arrive';
+    // reached this manoeuvre: move on
+    if (d < 25 && !isLast) {
+      stepIdx++;
+      said = {};
+      st = steps[stepIdx];
+      d = distM(lat, lon, st.lat, st.lon);
+      isLast = st.type === 'arrive';
+    }
+    navRender(d);
+    if (isLast) {
+      if (d < 120 && !said.far) { said.far = true; speak('Your destination is ahead'); }
+      return;
+    }
+    var phrase = stepPhrase(st);
+    if (d < 100 && !said.near) {
+      said.near = said.far = true;
+      speak(phrase + ' now');
+    } else if (d < 350 && d >= 100 && !said.far) {
+      said.far = true;
+      speak('In ' + spokenDist(d) + ', ' + phrase.charAt(0).toLowerCase() + phrase.slice(1));
+    }
+  }
+
   function clearRoute() {
     [routeLine, endMarker, startMarker].forEach(function (l) { if (l) map.removeLayer(l); });
     routeLine = endMarker = startMarker = null;
     routePts = null;
     offSince = 0;
+    navReset();
     tripEl.classList.add('hidden');
     resultsEl.innerHTML = '';
   }
@@ -460,7 +614,7 @@
 
   // Ask the route servers in turn (each gets 10 s). Returns the first good route.
   function fetchRoute(a, b, signal) {
-    var tail = a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=full&geometries=geojson';
+    var tail = a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=full&geometries=geojson&steps=true';
     var lastErr = 'no answer';
     function tryServer(i) {
       if (i >= OSRM_SERVERS.length) return Promise.reject(new Error(lastErr));
@@ -518,6 +672,7 @@
         if (!routeFromGps) {
           startMarker = L.circleMarker(a, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
         }
+        navStart(rt);
         tripTextEl.textContent = fmtTrip(rt.distance, rt.duration);
         tripEl.classList.remove('hidden');
         if (!isReroute) {
@@ -548,7 +703,9 @@
     if (distM(lat, lon, toPt.lat, toPt.lng) < 30) {
       setStatus('You have arrived');
       setTimeout(function () { setStatus(''); }, 4000);
+      var wasNav = !!steps;
       clearRoute();
+      if (wasNav) speak('You have arrived');
       return;
     }
     if (!routeFromGps) return; // custom start: no rerouting
@@ -610,6 +767,7 @@
     if (gpsStatus) { gpsStatus = false; setStatus(''); }
     lookupLimit(c.latitude, c.longitude);
     checkRoute(c.latitude, c.longitude);
+    navUpdate(c.latitude, c.longitude);
   }
 
   function onError(err) {

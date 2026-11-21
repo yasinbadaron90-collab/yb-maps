@@ -80,6 +80,21 @@ html, body {
   padding: 6px 4px 2px;
 }
 .trip button { background: #334155; padding: 0 14px; height: 34px; }
+.trip-btns { display: flex; gap: 8px; }
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #2563eb;
+  color: #fff;
+  border-radius: 12px;
+  padding: 8px 14px;
+  margin-top: 8px;
+}
+.nav-icon { font-size: 40px; line-height: 1; width: 44px; text-align: center; }
+.nav-body { display: flex; flex-direction: column; min-width: 0; }
+.nav-dist { font-size: 26px; font-weight: 800; line-height: 1.1; }
+.nav-text { font-size: 16px; font-weight: 600; opacity: 0.95; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hidden { display: none !important; }
 .end-icon { background: none; border: none; }
 .end-icon div {
