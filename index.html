@@ -17,6 +17,23 @@
 <body>
 <div id="map"></div>
 
+<div id="bar" class="bar">
+  <div class="row">
+    <span class="pin from"></span>
+    <input id="from" type="text" placeholder="From: my location" autocomplete="off" enterkeyhint="search">
+  </div>
+  <div class="row">
+    <span class="pin to"></span>
+    <input id="to" type="text" placeholder="Where to?" autocomplete="off" enterkeyhint="search">
+    <button id="go" type="button">Go</button>
+  </div>
+  <div id="results" class="results"></div>
+  <div id="trip" class="trip hidden">
+    <span id="trip-text"></span>
+    <button id="clear" type="button" aria-label="Clear route">✕</button>
+  </div>
+</div>
+
 <div id="status" class="status">Waiting for GPS…</div>
 
 <div id="card" class="card">
