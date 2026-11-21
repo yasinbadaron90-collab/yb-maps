@@ -193,3 +193,18 @@ html, body {
 .bar .saved-del { background: none; color: #94a3b8; font-size: 18px; padding: 0 10px; height: 34px; }
 
 #keypanel.hidden { display: none; }
+
+.traffic-btn {
+  position: fixed; right: 12px; bottom: 200px; z-index: 1100;
+  width: 48px; height: 48px; border-radius: 50%; border: 2px solid #475569;
+  background: rgba(15, 23, 42, 0.94); font-size: 22px; padding: 0; line-height: 1;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+}
+.traffic-btn.on { border-color: #22c55e; }
+.route-label { background: none; border: none; }
+.route-label div {
+  display: inline-block; white-space: nowrap; padding: 3px 9px; border-radius: 12px;
+  background: #fff; color: #334155; font: 700 13px/18px system-ui, sans-serif;
+  border: 2px solid #94a3b8; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+.route-label div.sel { background: #2563eb; color: #fff; border-color: #fff; }

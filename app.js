@@ -202,6 +202,9 @@
   var fromPt = null;           // null = use my GPS position
   var toPt = null;
   var routeLine = null, endMarker = null, startMarker = null;
+  var altLayers = L.layerGroup().addTo(map);   // alternative routes + time labels
+  var routeOpts = [], routeSel = 0;            // routes on offer, and which one is blue
+  var routeBaseAt = 0, routeBaseDur = 0, lastTrafficCheck = 0;
   var routePts = null;         // [{lat, lon}]
   var routeFromGps = true;
   var offSince = 0, lastReroute = 0, routing = false;
@@ -385,7 +388,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 16</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 17</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -396,6 +399,7 @@
       var v = document.getElementById('keyin').value.trim();
       if (!v) return;
       setKey(v);
+      updateTrafficUi();
       resultsEl.innerHTML = '<div class="msg">Saved. Business search is on.</div>';
       setTimeout(function () { if (!resultsEl.querySelector('.settings')) resultsEl.innerHTML = ''; }, 2500);
     });
@@ -414,6 +418,7 @@
     var off = document.getElementById('keyoff');
     if (off) off.addEventListener('click', function () {
       setKey('');
+      updateTrafficUi();
       resultsEl.innerHTML = '<div class="msg">Removed. Using free map data.</div>';
       setTimeout(function () { if (!resultsEl.querySelector('.settings')) resultsEl.innerHTML = ''; }, 2500);
     });
@@ -600,11 +605,15 @@
     el.addEventListener('keydown', function (e) { if (e.key === 'Enter') { el.blur(); go(); } });
   });
 
-  function fmtTrip(m, s) {
-    var km = m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
+  function fmtDur(s) {
     var min = Math.round(s / 60);
-    var t = min >= 60 ? Math.floor(min / 60) + ' h ' + (min % 60) + ' min' : Math.max(1, min) + ' min';
-    return km + ' · ' + t;
+    return min >= 60 ? Math.floor(min / 60) + ' h ' + (min % 60) + ' min' : Math.max(1, min) + ' min';
+  }
+  function fmtTrip(m, s, delay) {
+    var km = m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
+    var t = km + ' · ' + fmtDur(s);
+    if (delay >= 60) t += ' (+' + Math.round(delay / 60) + ' min traffic)';
+    return t;
   }
 
 
@@ -760,8 +769,11 @@
   }
 
   function clearRoute() {
+    if (routeLine && routeLine._label) map.removeLayer(routeLine._label);
     [routeLine, endMarker, startMarker].forEach(function (l) { if (l) map.removeLayer(l); });
     routeLine = endMarker = startMarker = null;
+    altLayers.clearLayers();
+    routeOpts = [];
     routePts = null;
     offSince = 0;
     navReset();
@@ -772,7 +784,7 @@
   var routeCtl = null;
 
   // Ask the route servers in turn (each gets 10 s). Returns the first good route.
-  function fetchRoute(a, b, signal) {
+  function fetchOsrm(a, b, signal) {
     var tail = a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=full&geometries=geojson&steps=true';
     var lastErr = 'no answer';
     function tryServer(i) {
@@ -790,7 +802,9 @@
           if (data.code !== 'Ok' || !data.routes || !data.routes.length) {
             throw new Error(data.code || 'no route');
           }
-          return data.routes[0];
+          var r0 = data.routes[0];
+          r0.delay = 0;
+          return r0;
         })
         .catch(function (err) {
           clearTimeout(timer);
@@ -802,9 +816,188 @@
     return tryServer(0);
   }
 
+  // ---------- TomTom routing: live traffic, fastest route, alternatives ----------
+  function mapTT(i) {
+    var m = i.maneuver, t = i.instructionType, p = i.point;
+    if (!p || t === 'DIRECTION_INFO' || t === 'LOCATION_WAYPOINT') return null;
+    var ang = i.turnAngleInDecimalDegrees || 0;
+    var side = ang < -10 ? 'left' : ang > 10 ? 'right' : 'straight';
+    var o = { type: 'turn', modifier: 'straight', exit: i.roundaboutExitNumber, location: [p.longitude, p.latitude] };
+    switch (m) {
+      case 'DEPART': o.type = 'depart'; break;
+      case 'ARRIVE': case 'ARRIVE_LEFT': case 'ARRIVE_RIGHT': o.type = 'arrive'; break;
+      case 'TURN_LEFT': o.modifier = 'left'; break;
+      case 'TURN_RIGHT': o.modifier = 'right'; break;
+      case 'SHARP_LEFT': o.modifier = 'sharp left'; break;
+      case 'SHARP_RIGHT': o.modifier = 'sharp right'; break;
+      case 'BEAR_LEFT': o.modifier = 'slight left'; break;
+      case 'BEAR_RIGHT': o.modifier = 'slight right'; break;
+      case 'KEEP_LEFT': o.type = 'fork'; o.modifier = 'left'; break;
+      case 'KEEP_RIGHT': o.type = 'fork'; o.modifier = 'right'; break;
+      case 'MAKE_UTURN': case 'TRY_MAKE_UTURN': o.modifier = 'uturn'; break;
+      case 'ROUNDABOUT_CROSS': case 'ROUNDABOUT_RIGHT': case 'ROUNDABOUT_LEFT': case 'ROUNDABOUT_BACK':
+        o.type = 'roundabout'; o.modifier = side; break;
+      case 'MOTORWAY_EXIT_LEFT': o.type = 'fork'; o.modifier = 'left'; break;
+      case 'MOTORWAY_EXIT_RIGHT': o.type = 'fork'; o.modifier = 'right'; break;
+      case 'ENTER_MOTORWAY': case 'ENTER_FREEWAY': case 'ENTER_HIGHWAY': case 'TAKE_EXIT':
+      case 'ENTRANCE_RAMP': case 'SWITCH_PARALLEL_ROAD': case 'SWITCH_MAIN_ROAD':
+        o.type = 'fork'; o.modifier = side; break;
+      default: return null; // straight on / follow the road: nothing to announce
+    }
+    var name = i.street || (i.roadNumbers && i.roadNumbers[0]) || '';
+    return { maneuver: o, name: name };
+  }
+
+  // TomTom answer -> same shape the OSRM route has, so drawing + voice are shared
+  function fromTomTom(r) {
+    var coords = [];
+    (r.legs || []).forEach(function (l) {
+      (l.points || []).forEach(function (p) { coords.push([p.longitude, p.latitude]); });
+    });
+    var steps = [];
+    ((r.guidance && r.guidance.instructions) || []).forEach(function (i) {
+      var st = mapTT(i);
+      if (st) steps.push(st);
+    });
+    if (coords.length && (!steps.length || steps[0].maneuver.type !== 'depart')) {
+      steps.unshift({ maneuver: { type: 'depart', location: coords[0] }, name: '' });
+    }
+    if (coords.length && steps[steps.length - 1].maneuver.type !== 'arrive') {
+      steps.push({ maneuver: { type: 'arrive', location: coords[coords.length - 1] }, name: '' });
+    }
+    var sm = r.summary || {};
+    return {
+      geometry: { coordinates: coords },
+      distance: sm.lengthInMeters,
+      duration: sm.travelTimeInSeconds,
+      delay: sm.trafficDelayInSeconds || 0,
+      legs: [{ steps: steps }]
+    };
+  }
+
+  function fetchTomTomRoutes(a, b, signal, alts, key) {
+    var url = 'https://api.tomtom.com/routing/1/calculateRoute/' + a.lat + ',' + a.lng + ':' + b.lat + ',' + b.lng +
+      '/json?key=' + encodeURIComponent(key) +
+      '&traffic=true&routeType=fastest&travelMode=car&computeTravelTimeFor=all&instructionsType=text&language=en-GB' +
+      '&maxAlternatives=' + (alts ? 2 : 0);
+    var ctl = new AbortController();
+    var timer = setTimeout(function () { ctl.abort(); }, 10000);
+    signal.addEventListener('abort', function () { ctl.abort(); });
+    return fetch(url, { signal: ctl.signal })
+      .then(function (r) {
+        clearTimeout(timer);
+        if (!r.ok) throw new Error('TomTom ' + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        if (!d.routes || !d.routes.length) throw new Error('no route');
+        return d.routes.map(fromTomTom).filter(function (x) { return x.geometry.coordinates.length > 1; });
+      })
+      .catch(function (e) { clearTimeout(timer); throw e; });
+  }
+
+  // Routes to offer. With a TomTom key: live-traffic fastest + alternatives. Otherwise (or if TomTom fails): free OSRM.
+  function fetchRoutes(a, b, signal, alts) {
+    var key = getKey();
+    var free = function () { return fetchOsrm(a, b, signal).then(function (r) { return [r]; }); };
+    if (!key) return free();
+    return fetchTomTomRoutes(a, b, signal, alts, key).then(function (rs) {
+      if (!rs.length) throw new Error('no route');
+      return rs;
+    }).catch(function (err) {
+      if (signal.aborted) throw err;
+      return free();
+    });
+  }
+
   function flash(text, isError, ms) {
     setStatus(text, isError);
     setTimeout(function () { if (statusEl.textContent === text) setStatus(''); }, ms || 6000);
+  }
+
+  function routeTag(rt) {
+    return fmtDur(rt.duration) + (rt.delay >= 60 ? ' · +' + Math.round(rt.delay / 60) : '');
+  }
+
+  function addRouteLine(i, sel) {
+    var rt = routeOpts[i];
+    var latlngs = rt.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
+    var line = L.polyline(latlngs, {
+      color: sel ? '#2563eb' : '#94a3b8', weight: sel ? 7 : 6, opacity: sel ? 0.9 : 0.85
+    });
+    if (routeOpts.length > 1) {
+      var mid = latlngs[Math.floor(latlngs.length / 2)];
+      var label = L.marker(mid, {
+        icon: L.divIcon({
+          className: 'route-label',
+          html: '<div class="' + (sel ? 'sel' : '') + '">' + routeTag(rt) + '</div>',
+          iconSize: [80, 26], iconAnchor: [40, 13]
+        }),
+        keyboard: false
+      });
+      label.on('click', function () { selectRoute(i); });
+      if (sel) label.addTo(map); else label.addTo(altLayers);
+      line._label = label;
+    }
+    if (sel) line.addTo(map); else { line.addTo(altLayers); line.on('click', function () { selectRoute(i); }); }
+    return line;
+  }
+
+  function renderRoutes() {
+    altLayers.clearLayers();
+    if (routeLine) {
+      if (routeLine._label) map.removeLayer(routeLine._label);
+      map.removeLayer(routeLine);
+      routeLine = null;
+    }
+    routeOpts.forEach(function (rt, i) { if (i !== routeSel) addRouteLine(i, false); });
+    routeLine = addRouteLine(routeSel, true);
+  }
+
+  // Make the chosen route the active one: path for off-route checks, voice steps, trip text
+  function applyRoute() {
+    var rt = routeOpts[routeSel];
+    routePts = rt.geometry.coordinates.map(function (c) { return { lat: c[1], lon: c[0] }; });
+    navStart(rt);
+    tripTextEl.textContent = fmtTrip(rt.distance, rt.duration, rt.delay);
+    tripEl.classList.remove('hidden');
+    routeBaseAt = Date.now();
+    routeBaseDur = rt.duration;
+  }
+
+  function selectRoute(i) {
+    if (i === routeSel || !routeOpts[i]) return;
+    routeSel = i;
+    renderRoutes();
+    applyRoute();
+  }
+
+  // mode: 'new' (fit map), 'reroute', 'faster' (traffic found a quicker way)
+  function showRoutes(routes, a, b, mode, savedSec) {
+    routes.sort(function (x, y) { return x.duration - y.duration; });
+    clearRoute();
+    routeOpts = routes;
+    routeSel = 0;
+    endMarker = L.marker(b, { icon: endIcon, interactive: false, keyboard: false }).addTo(map);
+    if (!routeFromGps) {
+      startMarker = L.circleMarker(a, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
+    }
+    renderRoutes();
+    applyRoute();
+    if (mode === 'new') {
+      var bnds = routeLine.getBounds();
+      altLayers.eachLayer(function (l) { if (l.getBounds) bnds.extend(l.getBounds()); });
+      map.fitBounds(bnds, { padding: [40, 40] });
+      pauseFollowUntil = Date.now() + 8000;
+      resetZoom = true;
+      setStatus('');
+    } else if (mode === 'faster') {
+      var mins = Math.max(1, Math.round(savedSec / 60));
+      flash('Faster route found · saves ' + mins + ' min', false, 6000);
+      speak('Faster route found, saving ' + mins + (mins === 1 ? ' minute' : ' minutes'));
+    } else {
+      flash('Rerouted', false, 2000);
+    }
   }
 
   function drawRoute(a, b, isReroute) {
@@ -820,34 +1013,33 @@
     var ctl = new AbortController();
     routeCtl = ctl;
     if (!isReroute) setStatus('Finding route…');
-    fetchRoute(a, b, ctl.signal)
-      .then(function (rt) {
+    fetchRoutes(a, b, ctl.signal, !isReroute)
+      .then(function (routes) {
         if (ctl.signal.aborted) return;
-        var latlngs = rt.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
-        clearRoute();
-        routePts = latlngs.map(function (p) { return { lat: p[0], lon: p[1] }; });
-        routeLine = L.polyline(latlngs, { color: '#2563eb', weight: 7, opacity: 0.85 }).addTo(map);
-        endMarker = L.marker(b, { icon: endIcon, interactive: false, keyboard: false }).addTo(map);
-        if (!routeFromGps) {
-          startMarker = L.circleMarker(a, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
-        }
-        navStart(rt);
-        tripTextEl.textContent = fmtTrip(rt.distance, rt.duration);
-        tripEl.classList.remove('hidden');
-        if (!isReroute) {
-          map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
-          pauseFollowUntil = Date.now() + 8000;
-          resetZoom = true;
-          setStatus('');
-        } else {
-          flash('Rerouted', false, 2000);
-        }
+        showRoutes(routes, a, b, isReroute ? 'reroute' : 'new');
       })
       .catch(function (err) {
         if (ctl.signal.aborted) return;
         flash((isReroute ? 'Reroute failed: ' : 'No route: ') + ((err && err.message) || 'unknown'), true, 7000);
       })
       .then(function () { if (routeCtl === ctl) { routing = false; routeCtl = null; } });
+  }
+
+  // Every 5 min on a TomTom route: if live traffic now has a clearly quicker way, switch to it
+  function trafficRefresh(lat, lon) {
+    var key = getKey();
+    var now = Date.now();
+    if (!key || !routePts || !toPt || !routeFromGps || routing) return;
+    if (now - routeBaseAt < 300000 || now - lastTrafficCheck < 300000) return;
+    lastTrafficCheck = now;
+    var ctl = new AbortController();
+    var here = L.latLng(lat, lon), dest = toPt;
+    fetchTomTomRoutes(here, dest, ctl.signal, false, key).then(function (rs) {
+      if (!routePts || toPt !== dest || routing || !rs.length) return;
+      var left = Math.max(0, routeBaseDur - (Date.now() - routeBaseAt) / 1000);
+      var saved = left - rs[0].duration;
+      if (saved >= 120) showRoutes(rs, here, dest, 'faster', saved);
+    }).catch(function () {});
   }
 
   clearEl.addEventListener('click', function () {
@@ -954,6 +1146,30 @@
     });
   }
 
+  // ---------- Live traffic overlay (TomTom flow tiles) ----------
+  var TRAFFIC_KEY = 'yb-maps-traffic';
+  var trafficOn = true;
+  try { trafficOn = localStorage.getItem(TRAFFIC_KEY) !== '0'; } catch (e) {}
+  var trafficLayer = null;
+  var trafficBtn = document.getElementById('traffic');
+  function updateTrafficUi() {
+    var key = getKey();
+    trafficBtn.classList.toggle('hidden', !key);
+    trafficBtn.classList.toggle('on', trafficOn && !!key);
+    if (trafficLayer) { map.removeLayer(trafficLayer); trafficLayer = null; }
+    if (key && trafficOn) {
+      trafficLayer = L.tileLayer('https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=' + encodeURIComponent(key), {
+        maxZoom: 19, opacity: 0.85
+      }).addTo(map);
+    }
+  }
+  trafficBtn.addEventListener('click', function () {
+    trafficOn = !trafficOn;
+    try { localStorage.setItem(TRAFFIC_KEY, trafficOn ? '1' : '0'); } catch (e) {}
+    updateTrafficUi();
+  });
+  updateTrafficUi();
+
   // ---------- GPS ----------
   var prevPos = null;
   var firstFix = true;
@@ -995,6 +1211,7 @@
     fetchCams(c.latitude, c.longitude);
     checkCams(c.latitude, c.longitude, c.speed, kmh);
     checkRoute(c.latitude, c.longitude);
+    trafficRefresh(c.latitude, c.longitude);
     navUpdate(c.latitude, c.longitude);
   }
 
