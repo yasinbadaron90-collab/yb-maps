@@ -258,8 +258,13 @@
   function search(text, onPick) {
     resultsEl.innerHTML = '<div class="msg">Searching…</div>';
     var first = lastLatLng ? nominatim(text, true) : nominatim(text, false);
+    var widened = false;
     first
-      .then(function (list) { return list.length || !lastLatLng ? list : nominatim(text, false); })
+      .then(function (list) {
+        if (list.length || !lastLatLng) return list;
+        widened = true;
+        return nominatim(text, false);
+      })
       .then(function (list) {
         if (lastLatLng) {
           list.forEach(function (r) {
@@ -268,11 +273,25 @@
           list.sort(function (x, y) { return x._dist - y._dist; });
         }
         showResults(list.slice(0, 8), onPick);
+        if (widened && list.length) {
+          var n = document.createElement('div');
+          n.className = 'msg';
+          n.textContent = 'None within 30 km. Showing the nearest found. Tip: press and hold the map to drop a pin.';
+          resultsEl.insertBefore(n, resultsEl.firstChild);
+        }
       })
       .catch(function () {
         resultsEl.innerHTML = '<div class="msg">Search failed. Try again.</div>';
       });
   }
+
+  // Press and hold the map to drop a destination pin
+  map.on('contextmenu', function (e) {
+    toPt = e.latlng;
+    toEl.value = 'Dropped pin';
+    resultsEl.innerHTML = '';
+    go();
+  });
 
   // Quick "near me" buttons
   var NEARBY = [
