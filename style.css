@@ -55,13 +55,20 @@ html, body {
 .pin.from { background: #2563eb; border: 3px solid #fff; }
 .pin.to { background: #dc2626; border: 3px solid #fff; }
 .results { max-height: 40vh; overflow-y: auto; }
-.results div {
+.results div.res, .results div.msg {
   padding: 11px 8px;
   color: #e2e8f0;
   font-size: 15px;
   border-top: 1px solid #1e293b;
 }
-.results div:active { background: #1e293b; }
+.results div.res { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.results div.res:active { background: #1e293b; }
+.res-name { display: flex; flex-direction: column; min-width: 0; }
+.res-name b { font-size: 16px; font-weight: 600; color: #fff; }
+.res-name small { font-size: 12px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.res-dist { flex: none; color: #60a5fa; font-weight: 700; font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 2px 4px; border-top: 1px solid #1e293b; }
+.bar .chip { height: 38px; padding: 0 12px; font-size: 15px; background: #1e293b; font-weight: 600; }
 .results .msg { color: #94a3b8; }
 .trip {
   display: flex;

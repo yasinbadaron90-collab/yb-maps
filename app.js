@@ -203,6 +203,10 @@
     return parts.slice(0, 2).join(',').trim();
   }
 
+  function fmtDist(m) {
+    return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
+  }
+
   function showResults(list, onPick) {
     resultsEl.innerHTML = '';
     if (!list.length) {
@@ -214,7 +218,23 @@
     }
     list.forEach(function (r) {
       var d = document.createElement('div');
-      d.textContent = r.display_name;
+      d.className = 'res';
+      var left = document.createElement('span');
+      left.className = 'res-name';
+      var parts = String(r.display_name).split(',');
+      var t = document.createElement('b');
+      t.textContent = parts[0];
+      var rest = document.createElement('small');
+      rest.textContent = parts.slice(1, 4).join(',').trim();
+      left.appendChild(t);
+      left.appendChild(rest);
+      d.appendChild(left);
+      if (r._dist != null) {
+        var dist = document.createElement('span');
+        dist.className = 'res-dist';
+        dist.textContent = fmtDist(r._dist);
+        d.appendChild(dist);
+      }
       d.addEventListener('click', function () {
         resultsEl.innerHTML = '';
         onPick(r);
@@ -223,20 +243,60 @@
     });
   }
 
+  function nominatim(text, bounded) {
+    var url = NOMINATIM + '?format=jsonv2&limit=10&q=' + encodeURIComponent(text);
+    if (lastLatLng) {
+      var b = lastLatLng, d = bounded ? 0.3 : 0.7; // ~30 km box, or soft bias
+      url += '&viewbox=' + (b.lng - d) + ',' + (b.lat + d) + ',' + (b.lng + d) + ',' + (b.lat - d);
+      if (bounded) url += '&bounded=1';
+    }
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+  }
+
+  // Nearest first. Looks within ~30 km of me, widens if nothing is found.
   function search(text, onPick) {
     resultsEl.innerHTML = '<div class="msg">Searching…</div>';
-    var url = NOMINATIM + '?format=jsonv2&limit=5&q=' + encodeURIComponent(text);
-    if (lastLatLng) {
-      // prefer places near me (soft bias, not a limit)
-      var b = lastLatLng;
-      url += '&viewbox=' + (b.lng - 0.7) + ',' + (b.lat + 0.7) + ',' + (b.lng + 0.7) + ',' + (b.lat - 0.7);
-    }
-    fetch(url, { headers: { 'Accept': 'application/json' } })
-      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then(function (list) { showResults(list, onPick); })
+    var first = lastLatLng ? nominatim(text, true) : nominatim(text, false);
+    first
+      .then(function (list) { return list.length || !lastLatLng ? list : nominatim(text, false); })
+      .then(function (list) {
+        if (lastLatLng) {
+          list.forEach(function (r) {
+            r._dist = distM(lastLatLng.lat, lastLatLng.lng, parseFloat(r.lat), parseFloat(r.lon));
+          });
+          list.sort(function (x, y) { return x._dist - y._dist; });
+        }
+        showResults(list.slice(0, 8), onPick);
+      })
       .catch(function () {
         resultsEl.innerHTML = '<div class="msg">Search failed. Try again.</div>';
       });
+  }
+
+  // Quick "near me" buttons
+  var NEARBY = [
+    ['⛽ Fuel', 'petrol station'], ['🛒 Shops', 'supermarket'], ['🍔 Food', 'restaurant'],
+    ['🏧 ATM', 'atm'], ['🏥 Hospital', 'hospital'], ['🅿️ Parking', 'parking']
+  ];
+  function showNearbyChips() {
+    if (toEl.value.trim() || routePts) return;
+    resultsEl.innerHTML = '';
+    var wrap = document.createElement('div');
+    wrap.className = 'chips';
+    NEARBY.forEach(function (n) {
+      var c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'chip';
+      c.textContent = n[0];
+      c.addEventListener('click', function () {
+        toEl.value = n[1];
+        toPt = null;
+        search(n[1], pickTo);
+      });
+      wrap.appendChild(c);
+    });
+    resultsEl.appendChild(wrap);
   }
 
   function pickTo(r) {
@@ -271,6 +331,7 @@
   hereEl.addEventListener('click', useMyLocation);
   fromEl.addEventListener('focus', function () { if (fromEl.value === MY_LOC) fromEl.select(); });
   fromEl.addEventListener('input', function () { fromPt = null; });
+  toEl.addEventListener('focus', showNearbyChips);
   toEl.addEventListener('input', function () { toPt = null; });
   goEl.addEventListener('click', go);
   [fromEl, toEl].forEach(function (el) {
