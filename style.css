@@ -191,3 +191,5 @@ html, body {
 .namer input { flex: 1; }
 .res-right { display: flex; align-items: center; gap: 4px; flex: none; }
 .bar .saved-del { background: none; color: #94a3b8; font-size: 18px; padding: 0 10px; height: 34px; }
+
+#keypanel.hidden { display: none; }

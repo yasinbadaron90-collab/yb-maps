@@ -377,13 +377,21 @@
     var has = !!getKey();
     box.innerHTML =
       '<p class="state">Business search: ' + (has ? 'ON' : 'OFF') + '</p>' +
-      '<p>Finds shops and businesses like Google Maps. Get a free key at developer.tomtom.com, then paste it here. It stays on this phone.</p>' +
-      '<div class="srow"><input id="keyin" type="password" placeholder="Paste key" autocomplete="off">' +
-      '<button id="keysave" type="button">Save</button></div>' +
-      (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
+      '<div class="srow"><button id="keytoggle" type="button" class="btn2">🔑 Business search key ▸</button></div>' +
+      '<div id="keypanel" class="hidden">' +
+        '<p>Finds shops and businesses like Google Maps. Get a free key at developer.tomtom.com, then paste it here. It stays on this phone.</p>' +
+        '<div class="srow"><input id="keyin" type="password" placeholder="Paste key" autocomplete="off">' +
+        '<button id="keysave" type="button">Save</button></div>' +
+        (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
+      '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 15</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 16</p>';
     resultsEl.appendChild(box);
+    var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
+    kt.addEventListener('click', function () {
+      var open = kp.classList.toggle('hidden') === false;
+      kt.textContent = '🔑 Business search key ' + (open ? '▾' : '▸');
+    });
     document.getElementById('keysave').addEventListener('click', function () {
       var v = document.getElementById('keyin').value.trim();
       if (!v) return;
@@ -411,6 +419,8 @@
     });
   }
   document.getElementById('cog').addEventListener('click', showSettings);
+  // tapping the map hides the settings panel
+  map.on('click', function () { if (resultsEl.querySelector('.settings')) resultsEl.innerHTML = ''; });
 
   // Press and hold the map to drop a destination pin
   map.on('contextmenu', function (e) {
