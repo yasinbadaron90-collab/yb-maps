@@ -66,7 +66,7 @@ A new key goes in this table the same day it is added.
 
 - Separate repo `yb-maps`, public. Commit straight to `main`. No other branches, no pull requests. Do not ask before committing; report what changed.
 - Output full working files, never `// ... existing code`.
-- Every change to a cached file bumps `CACHE_VERSION` in `sw.js` and the "App version" text in Settings, together (v14 to v15 and so on).
+- Every change to a cached file bumps `CACHE_VERSION` in `sw.js` and the "App version" text in Settings, together (v14 to v15 and so on). `ARCHITECTURE.md` is not cached, so docs-only commits do not bump.
 - Keys and passwords: Yasin types them himself. Never in the repo, never in chat, never hardcoded.
 - Every network call has a timeout and a clear error message. A busy server must never freeze the screen.
 - Speed limits and camera warnings are a guide. The road signs always win. Show "?" instead of guessing.
@@ -74,5 +74,5 @@ A new key goes in this table the same day it is added.
 - Before pushing: `node --check app.js`, then a phone-size browser test (390 x 844) with no page errors, and send Yasin a screenshot.
 - After pushing: confirm `sw.js` on the live site shows the new version, then tell Yasin to open Settings, tap "Refresh app", and look for the new version number plus 1 to 3 specific things to try.
 - Yasin is on his phone and is a visual learner: short plain English, say what changed and what to check, use a diagram or screenshot when explaining something new.
-- When a mistake is found, a separate sub-agent that did not build the fix checks the corrected work before it is called right.
+- **Every change gets checked by a separate sub-agent that did not build it (fresh eyes) before it is pushed and called done**, not only when a mistake is found. It checks the code, the phone-size test, and that this file matches. Fix what it finds, then have it re-check.
 - **Every time anything is added or changed, update this file in the same commit.** New or changed feature, behaviour, section, file, service, storage key or rule: all of it. Check the file before saying the work is done. No exceptions.
