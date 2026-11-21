@@ -34,7 +34,7 @@ Plain HTML, CSS and JavaScript. Leaflet (saved in `vendor/`, not loaded from a C
 8. TomTom routing: live-traffic fastest route and alternatives; falls back to OSRM
 9. Speed cameras: from OpenStreetMap, warns about 500 m ahead
 10. Live traffic overlay: TomTom flow tiles
-11. GPS: the position handler that feeds everything above
+11. GPS: the position handler that feeds everything above. Touching the map pauses auto-follow for 10 s; the 🎯 recentre button brings it back at once
 12. Keep screen awake: Screen Wake Lock
 13. Service worker registration
 
@@ -75,4 +75,4 @@ A new key goes in this table the same day it is added.
 - After pushing: confirm `sw.js` on the live site shows the new version, then tell Yasin to open Settings, tap "Refresh app", and look for the new version number plus 1 to 3 specific things to try.
 - Yasin is on his phone and is a visual learner: short plain English, say what changed and what to check, use a diagram or screenshot when explaining something new.
 - When a mistake is found, a separate sub-agent that did not build the fix checks the corrected work before it is called right.
-- Update this file when a section, file, service or storage key is added or removed.
+- **Every time anything is added or changed, update this file in the same commit.** New or changed feature, behaviour, section, file, service, storage key or rule: all of it. Check the file before saying the work is done. No exceptions.
