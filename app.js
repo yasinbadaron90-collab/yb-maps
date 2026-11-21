@@ -2,7 +2,11 @@
   'use strict';
 
   var DEFAULT_CENTER = [-33.9249, 18.4241]; // Cape Town
-  var OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+  var OVERPASS_URLS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter'
+  ];
   var LIMIT_MIN_MOVE_M = 40;     // re-query after moving this far
   var LIMIT_MIN_INTERVAL_MS = 8000;
   var HEADING_MIN_SPEED = 1.5;   // m/s, below this GPS heading is unreliable
@@ -120,6 +124,26 @@
     }
   }
 
+  // Ask the OSM data servers in turn; the first good answer wins.
+  function overpass(q, perServerMs) {
+    function tryAt(i) {
+      if (i >= OVERPASS_URLS.length) return Promise.reject(new Error('OSM data servers busy'));
+      var ctrl = new AbortController();
+      var t = setTimeout(function () { ctrl.abort(); }, perServerMs);
+      return fetch(OVERPASS_URLS[i], {
+        method: 'POST',
+        body: 'data=' + encodeURIComponent(q),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        signal: ctrl.signal
+      }).then(function (r) {
+        clearTimeout(t);
+        if (!r.ok) throw new Error('Overpass ' + r.status);
+        return r.json();
+      }).catch(function () { clearTimeout(t); return tryAt(i + 1); });
+    }
+    return tryAt(0);
+  }
+
   function lookupLimit(lat, lon) {
     var now = Date.now();
     if (queryBusy) return;
@@ -132,19 +156,7 @@
 
     var q = '[out:json][timeout:10];way(around:30,' + lat.toFixed(6) + ',' + lon.toFixed(6) +
             ')[highway];out tags geom;';
-    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 12000);
-
-    fetch(OVERPASS_URL, {
-      method: 'POST',
-      body: 'data=' + encodeURIComponent(q),
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      signal: ctrl ? ctrl.signal : undefined
-    })
-      .then(function (r) {
-        if (!r.ok) throw new Error('Overpass ' + r.status);
-        return r.json();
-      })
+    overpass(q, 8000)
       .then(function (data) {
         var p = { lat: lat, lon: lon };
         var best = null, bestD = Infinity;
@@ -162,7 +174,6 @@
         lastQuery.time = Date.now() - LIMIT_MIN_INTERVAL_MS + 3000; // retry soon
       })
       .then(function () {
-        clearTimeout(timer);
         queryBusy = false;
       });
   }
@@ -371,7 +382,7 @@
       '<button id="keysave" type="button">Save</button></div>' +
       (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 13</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 14</p>';
     resultsEl.appendChild(box);
     document.getElementById('keysave').addEventListener('click', function () {
       var v = document.getElementById('keyin').value.trim();
@@ -761,6 +772,73 @@
     }
   }
 
+  // ---------- Speed cameras (from OpenStreetMap) ----------
+  var CAM_KEY = 'yb-maps-cams';
+  var CAM_RADIUS_M = 10000, CAM_REFETCH_M = 4000, CAM_WARN_M = 500, CAM_CLEAR_M = 800;
+  var cams = [], camCenter = null, camBusy = false, camLastTry = 0, camWarned = {};
+  var camLayer = L.layerGroup().addTo(map);
+  var camIcon = L.divIcon({ className: 'cam-icon', html: '<div>📷</div>', iconSize: [28, 28], iconAnchor: [14, 14] });
+
+  function drawCams() {
+    camLayer.clearLayers();
+    cams.forEach(function (c) {
+      L.marker([c.lat, c.lon], { icon: camIcon, interactive: false, keyboard: false }).addTo(camLayer);
+    });
+  }
+  try {
+    var savedCams = JSON.parse(localStorage.getItem(CAM_KEY) || 'null');
+    if (savedCams && savedCams.cams) { cams = savedCams.cams; camCenter = savedCams.center; drawCams(); }
+  } catch (e) {}
+
+  function fetchCams(lat, lon) {
+    var now = Date.now();
+    if (camBusy || now - camLastTry < 30000) return;
+    if (camCenter && distM(camCenter.lat, camCenter.lon, lat, lon) < CAM_REFETCH_M) return;
+    camBusy = true;
+    camLastTry = now;
+    var a = 'around:' + CAM_RADIUS_M + ',' + lat.toFixed(5) + ',' + lon.toFixed(5);
+    var q = '[out:json][timeout:25];(node["highway"="speed_camera"](' + a + ');node["enforcement"="maxspeed"](' + a + '););out;';
+    overpass(q, 15000)
+      .then(function (data) {
+        var seen = {};
+        cams = [];
+        (data.elements || []).forEach(function (e) {
+          if (e.lat == null || seen[e.id]) return;
+          seen[e.id] = 1;
+          cams.push({ id: e.id, lat: e.lat, lon: e.lon, max: parseMaxspeed(e.tags && e.tags.maxspeed) });
+        });
+        camCenter = { lat: lat, lon: lon };
+        try { localStorage.setItem(CAM_KEY, JSON.stringify({ cams: cams, center: camCenter })); } catch (e) {}
+        drawCams();
+      })
+      .catch(function () {})
+      .then(function () { camBusy = false; });
+  }
+
+  function angDiff(a, b) {
+    var d = Math.abs(a - b) % 360;
+    return d > 180 ? 360 - d : d;
+  }
+
+  function checkCams(lat, lon, speedMs, kmh) {
+    if (!cams.length) return;
+    var me = L.latLng(lat, lon);
+    var moving = speedMs != null && speedMs >= 3;
+    cams.forEach(function (c) {
+      var d = distM(lat, lon, c.lat, c.lon);
+      if (d > CAM_CLEAR_M) { delete camWarned[c.id]; return; }
+      if (!moving || d > CAM_WARN_M || camWarned[c.id]) return;
+      if (angDiff(bearing(me, L.latLng(c.lat, c.lon)), heading) > 45) return; // not ahead of me
+      camWarned[c.id] = true;
+      var lim = c.max != null ? c.max : currentLimit;
+      var slow = lim != null && kmh != null && kmh > lim + 3;
+      var text = 'Speed camera ahead · ' + (Math.round(d / 50) * 50) + ' m' + (slow ? ' · slow down' : '');
+      flash(text, true, 7000);
+      speak('Speed camera ahead' + (slow ? ', slow down' : ''));
+      try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) {}
+    });
+  }
+
   // ---------- GPS ----------
   var prevPos = null;
   var firstFix = true;
@@ -799,6 +877,8 @@
 
     if (gpsStatus) { gpsStatus = false; setStatus(''); }
     lookupLimit(c.latitude, c.longitude);
+    fetchCams(c.latitude, c.longitude);
+    checkCams(c.latitude, c.longitude, c.speed, kmh);
     checkRoute(c.latitude, c.longitude);
     navUpdate(c.latitude, c.longitude);
   }

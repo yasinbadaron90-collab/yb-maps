@@ -177,3 +177,10 @@ html, body {
 .settings input { flex: 1; }
 .settings .state { margin: 0 0 6px; font-weight: 700; }
 .bar .btn2 { background: #334155; }
+
+.cam-icon { background: none; border: none; }
+.cam-icon div {
+  width: 28px; height: 28px; line-height: 24px; text-align: center; font-size: 15px;
+  background: #fff; border: 2px solid #dc2626; border-radius: 50%;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+}
