@@ -388,7 +388,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 17</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 18</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -1170,6 +1170,23 @@
   });
   updateTrafficUi();
 
+  // Touching the map (drag / pinch) pauses auto-follow for 10 s so the map stops snapping back.
+  var recenterBtn = document.getElementById('recenter');
+  function holdFollow() {
+    pauseFollowUntil = Math.max(pauseFollowUntil, Date.now() + 10000);
+    recenterBtn.classList.remove('hidden');
+  }
+  var mapBox = map.getContainer();
+  ['touchstart', 'touchmove', 'touchend', 'wheel', 'mousedown'].forEach(function (ev) {
+    mapBox.addEventListener(ev, holdFollow, { passive: true });
+  });
+  recenterBtn.addEventListener('click', function () {
+    pauseFollowUntil = 0;
+    recenterBtn.classList.add('hidden');
+    if (lastLatLng) map.setView(lastLatLng, map.getZoom(), { animate: true });
+  });
+  setInterval(function () { if (Date.now() > pauseFollowUntil) recenterBtn.classList.add('hidden'); }, 1000);
+
   // ---------- GPS ----------
   var prevPos = null;
   var firstFix = true;
@@ -1204,6 +1221,7 @@
       resetZoom = false;
       map.setView(latlng, z, { animate: !firstFix });
     }
+    recenterBtn.classList.toggle('hidden', !firstFix && Date.now() > pauseFollowUntil);
     firstFix = false;
 
     if (gpsStatus) { gpsStatus = false; setStatus(''); }
