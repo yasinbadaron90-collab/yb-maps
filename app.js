@@ -314,9 +314,15 @@
         return r.json();
       }).then(function (d) { return d.results || []; });
     }
+    // TomTom misses some places OSM has (and the other way round), so ask both and merge.
+    var osmList = nominatim(text, !!lastLatLng)
+      .then(function (l) { return l.length || !lastLatLng ? l : nominatim(text, false); })
+      .catch(function () { return []; });
     call(true)
       .then(function (list) { return list.length || !lastLatLng ? list : call(false); })
-      .then(function (list) {
+      .then(function (list) { return osmList.then(function (o) { return { tt: list, osm: o }; }); })
+      .then(function (both) {
+        var list = both.tt;
         var out = list.map(function (r) {
           var addr = (r.address && r.address.freeformAddress) || '';
           var name = r.poi && r.poi.name;
@@ -325,6 +331,15 @@
             lat: r.position.lat, lon: r.position.lon,
             _dist: lastLatLng ? distM(lastLatLng.lat, lastLatLng.lng, r.position.lat, r.position.lon) : null
           };
+        });
+        both.osm.forEach(function (r) {
+          var la = parseFloat(r.lat), lo = parseFloat(r.lon);
+          var dup = out.some(function (o) { return distM(o.lat, o.lon, la, lo) < 80; });
+          if (dup) return;
+          out.push({
+            display_name: r.display_name, lat: la, lon: lo,
+            _dist: lastLatLng ? distM(lastLatLng.lat, lastLatLng.lng, la, lo) : null
+          });
         });
         if (lastLatLng) out.sort(function (x, y) { return x._dist - y._dist; });
         showResults(out.slice(0, 8), onPick);
