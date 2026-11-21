@@ -382,7 +382,7 @@
       '<button id="keysave" type="button">Save</button></div>' +
       (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 14</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 15</p>';
     resultsEl.appendChild(box);
     document.getElementById('keysave').addEventListener('click', function () {
       var v = document.getElementById('keyin').value.trim();
@@ -425,9 +425,99 @@
     ['⛽ Fuel', 'petrol station'], ['🛒 Shops', 'supermarket'], ['🍔 Food', 'restaurant'],
     ['🏧 ATM', 'atm'], ['🏥 Hospital', 'hospital'], ['🅿️ Parking', 'parking']
   ];
+  // ---------- Saved places (Home, Work, favourites) — stored on this phone ----------
+  var PLACES_KEY = 'yb-maps-places';
+  function getPlaces() {
+    try { var l = JSON.parse(localStorage.getItem(PLACES_KEY) || '[]'); return Array.isArray(l) ? l : []; }
+    catch (e) { return []; }
+  }
+  function setPlaces(l) { try { localStorage.setItem(PLACES_KEY, JSON.stringify(l)); } catch (e) {} }
+  function savePlace(name, lat, lon) {
+    var l = getPlaces().filter(function (p) { return p.name.toLowerCase() !== name.toLowerCase(); });
+    l.push({ name: name, lat: lat, lon: lon });
+    setPlaces(l);
+  }
+  function placeSaved(name) {
+    resultsEl.innerHTML = '<div class="msg">Saved “' + name.replace(/</g, '&lt;') + '”. Tap “Where to?” to use it.</div>';
+    setTimeout(function () { if (resultsEl.querySelector('.msg') && !resultsEl.querySelector('.res')) resultsEl.innerHTML = ''; }, 3000);
+  }
+
+  // Ask what to call a place, then save it
+  function showNamePicker(lat, lon, hint) {
+    resultsEl.innerHTML = '';
+    var box = document.createElement('div');
+    box.className = 'namer';
+    box.innerHTML =
+      '<p class="state">Save this place as:</p>' +
+      '<div class="chips" style="border:0;padding:0 0 8px"></div>' +
+      '<div class="srow"><input id="pname" type="text" placeholder="Name, e.g. Home" autocomplete="off">' +
+      '<button id="psave" type="button">Save</button></div>';
+    resultsEl.appendChild(box);
+    var input = document.getElementById('pname');
+    if (hint) input.value = hint;
+    var chips = box.querySelector('.chips');
+    ['Home', 'Work'].forEach(function (n) {
+      var c = document.createElement('button');
+      c.type = 'button'; c.className = 'chip'; c.textContent = n;
+      c.addEventListener('click', function () { input.value = n; });
+      chips.appendChild(c);
+    });
+    document.getElementById('psave').addEventListener('click', function () {
+      var name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      savePlace(name, lat, lon);
+      placeSaved(name);
+    });
+  }
+
+  document.getElementById('save-place').addEventListener('click', function () {
+    if (!toPt) return;
+    showNamePicker(toPt.lat, toPt.lng, '');
+  });
+
   function showNearbyChips() {
     if (toEl.value.trim() || routePts) return;
     resultsEl.innerHTML = '';
+
+    var places = getPlaces();
+    places.forEach(function (p, i) {
+      var d = document.createElement('div');
+      d.className = 'res';
+      var left = document.createElement('span');
+      left.className = 'res-name';
+      var t = document.createElement('b');
+      t.textContent = '⭐ ' + p.name;
+      left.appendChild(t);
+      d.appendChild(left);
+      var right = document.createElement('span');
+      right.className = 'res-right';
+      if (lastLatLng) {
+        var dist = document.createElement('span');
+        dist.className = 'res-dist';
+        dist.textContent = fmtDist(distM(lastLatLng.lat, lastLatLng.lng, p.lat, p.lon));
+        right.appendChild(dist);
+      }
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'saved-del';
+      del.setAttribute('aria-label', 'Remove ' + p.name);
+      del.textContent = '✕';
+      del.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        if (!confirm('Remove “' + p.name + '”?')) return;
+        var l = getPlaces(); l.splice(i, 1); setPlaces(l);
+        showNearbyChips();
+      });
+      right.appendChild(del);
+      d.appendChild(right);
+      d.addEventListener('click', function () {
+        toPt = L.latLng(p.lat, p.lon);
+        toEl.value = p.name;
+        go();
+      });
+      resultsEl.appendChild(d);
+    });
+
     var wrap = document.createElement('div');
     wrap.className = 'chips';
     NEARBY.forEach(function (n) {
@@ -442,7 +532,22 @@
       });
       wrap.appendChild(c);
     });
+    var here = document.createElement('button');
+    here.type = 'button';
+    here.className = 'chip';
+    here.textContent = '⭐ Save where I am';
+    here.addEventListener('click', function () {
+      if (!lastLatLng) { flash('Waiting for GPS…', false, 3000); return; }
+      showNamePicker(lastLatLng.lat, lastLatLng.lng, '');
+    });
+    wrap.appendChild(here);
     resultsEl.appendChild(wrap);
+    if (!places.length) {
+      var hint = document.createElement('div');
+      hint.className = 'msg';
+      hint.textContent = 'No saved places yet. Pick a destination, then tap ⭐ to save it as Home, Work, etc.';
+      resultsEl.appendChild(hint);
+    }
   }
 
   function pickTo(r) {

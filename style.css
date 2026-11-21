@@ -184,3 +184,10 @@ html, body {
   background: #fff; border: 2px solid #dc2626; border-radius: 50%;
   box-shadow: 0 2px 5px rgba(0,0,0,0.4);
 }
+
+.namer { padding: 8px 2px 4px; border-top: 1px solid #1e293b; color: #e2e8f0; font-size: 14px; }
+.namer .state { margin: 0 0 8px; font-weight: 700; }
+.namer .srow { display: flex; gap: 8px; }
+.namer input { flex: 1; }
+.res-right { display: flex; align-items: center; gap: 4px; flex: none; }
+.bar .saved-del { background: none; color: #94a3b8; font-size: 18px; padding: 0 10px; height: 34px; }
