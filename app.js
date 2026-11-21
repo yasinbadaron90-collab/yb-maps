@@ -169,7 +169,10 @@
 
   // ---------- Destination search + route ----------
   var NOMINATIM = 'https://nominatim.openstreetmap.org/search';
-  var OSRM = 'https://router.project-osrm.org/route/v1/driving/';
+  var OSRM_SERVERS = [
+    'https://router.project-osrm.org/route/v1/driving/',
+    'https://routing.openstreetmap.de/routed-car/route/v1/driving/'
+  ];
   var OFF_ROUTE_M = 50;
   var OFF_ROUTE_MS = 4000;
   var REROUTE_GAP_MS = 10000;
@@ -373,17 +376,60 @@
     resultsEl.innerHTML = '';
   }
 
+  var routeCtl = null;
+
+  // Ask the route servers in turn (each gets 10 s). Returns the first good route.
+  function fetchRoute(a, b, signal) {
+    var tail = a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=full&geometries=geojson';
+    var lastErr = 'no answer';
+    function tryServer(i) {
+      if (i >= OSRM_SERVERS.length) return Promise.reject(new Error(lastErr));
+      var ctl = new AbortController();
+      var timer = setTimeout(function () { ctl.abort(); }, 10000);
+      signal.addEventListener('abort', function () { ctl.abort(); });
+      return fetch(OSRM_SERVERS[i] + tail, { signal: ctl.signal })
+        .then(function (r) {
+          clearTimeout(timer);
+          if (!r.ok) throw new Error('server ' + r.status);
+          return r.json();
+        })
+        .then(function (data) {
+          if (data.code !== 'Ok' || !data.routes || !data.routes.length) {
+            throw new Error(data.code || 'no route');
+          }
+          return data.routes[0];
+        })
+        .catch(function (err) {
+          clearTimeout(timer);
+          if (signal.aborted) throw err;
+          lastErr = (err && err.name === 'AbortError') ? 'timed out' : (err && err.message) || 'failed';
+          return tryServer(i + 1);
+        });
+    }
+    return tryServer(0);
+  }
+
+  function flash(text, isError, ms) {
+    setStatus(text, isError);
+    setTimeout(function () { if (statusEl.textContent === text) setStatus(''); }, ms || 6000);
+  }
+
   function drawRoute(a, b, isReroute) {
-    if (routing) return;
+    if (routing) {
+      if (isReroute) return;          // let the running request finish
+      if (routeCtl) routeCtl.abort(); // a new destination replaces a stuck one
+    }
+    if (!isReroute && distM(a.lat, a.lng, b.lat, b.lng) < 40) {
+      flash('You are already here');
+      return;
+    }
     routing = true;
+    var ctl = new AbortController();
+    routeCtl = ctl;
     if (!isReroute) setStatus('Finding route…');
-    var url = OSRM + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat +
-              '?overview=full&geometries=geojson';
-    fetch(url)
-      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then(function (data) {
-        if (!data.routes || !data.routes.length) throw new Error('none');
-        var rt = data.routes[0];
+    fetchRoute(a, b, ctl.signal)
+      .then(function (rt) {
+        if (ctl.signal.aborted) return;
         var latlngs = rt.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
         clearRoute();
         routePts = latlngs.map(function (p) { return { lat: p[0], lon: p[1] }; });
@@ -396,19 +442,18 @@
         tripEl.classList.remove('hidden');
         if (!isReroute) {
           map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
-          pauseFollowUntil = Date.now() + 6000;
+          pauseFollowUntil = Date.now() + 8000;
           resetZoom = true;
           setStatus('');
         } else {
-          setStatus('Rerouted');
-          setTimeout(function () { setStatus(''); }, 2000);
+          flash('Rerouted', false, 2000);
         }
       })
-      .catch(function () {
-        setStatus(isReroute ? 'Reroute failed' : 'No route found', true);
-        setTimeout(function () { setStatus(''); }, 3000);
+      .catch(function (err) {
+        if (ctl.signal.aborted) return;
+        flash((isReroute ? 'Reroute failed: ' : 'No route: ') + ((err && err.message) || 'unknown'), true, 7000);
       })
-      .then(function () { routing = false; });
+      .then(function () { if (routeCtl === ctl) { routing = false; routeCtl = null; } });
   }
 
   clearEl.addEventListener('click', function () {
@@ -476,7 +521,7 @@
 
     lastLatLng = latlng;
     if (firstFix || Date.now() > pauseFollowUntil) {
-      var z = (firstFix || resetZoom) ? 17 : map.getZoom();
+      var z = (firstFix || resetZoom) ? (routePts ? 16 : 17) : map.getZoom();
       resetZoom = false;
       map.setView(latlng, z, { animate: !firstFix });
     }
