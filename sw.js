@@ -1,5 +1,5 @@
 // Bump CACHE_VERSION on every change to a cached file.
-var CACHE_VERSION = 'yb-maps-v2';
+var CACHE_VERSION = 'yb-maps-v3';
 var SHELL = [
   './',
   'index.html',
@@ -34,9 +34,16 @@ self.addEventListener('fetch', function (e) {
   var req = e.request;
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
-  // App files: cache first. Map tiles, Overpass etc: straight to network.
+  // App files: network first. Map tiles, Overpass etc: straight to network.
   if (url.origin !== self.location.origin) return;
+  // Network first so updates show straight away; cache is the offline fallback.
   e.respondWith(
-    caches.match(req).then(function (hit) { return hit || fetch(req); })
+    fetch(req).then(function (res) {
+      if (res && res.ok) {
+        var copy = res.clone();
+        caches.open(CACHE_VERSION).then(function (c) { c.put(req, copy); });
+      }
+      return res;
+    }).catch(function () { return caches.match(req); })
   );
 });
