@@ -343,6 +343,8 @@
   }
 
   function showSettings() {
+    // tap the cog again to hide the panel
+    if (resultsEl.querySelector('.settings')) { resultsEl.innerHTML = ''; return; }
     resultsEl.innerHTML = '';
     var box = document.createElement('div');
     box.className = 'settings';
@@ -359,11 +361,13 @@
       if (!v) return;
       setKey(v);
       resultsEl.innerHTML = '<div class="msg">Saved. Business search is on.</div>';
+      setTimeout(function () { if (!resultsEl.querySelector('.settings')) resultsEl.innerHTML = ''; }, 2500);
     });
     var off = document.getElementById('keyoff');
     if (off) off.addEventListener('click', function () {
       setKey('');
       resultsEl.innerHTML = '<div class="msg">Removed. Using free map data.</div>';
+      setTimeout(function () { if (!resultsEl.querySelector('.settings')) resultsEl.innerHTML = ''; }, 2500);
     });
   }
   document.getElementById('cog').addEventListener('click', showSettings);
