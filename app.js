@@ -215,6 +215,58 @@
     className: 'end-icon', html: '<div></div>', iconSize: [22, 22], iconAnchor: [11, 11]
   });
 
+  // ---------- Stops (pickups on the way). Order = the order listed ----------
+  var stopsEl = document.getElementById('stops');
+  var stops = [];                 // [{row, input, pt, done}]
+  var MAX_STOPS = 8;
+  var stopLayer = L.layerGroup().addTo(map);
+
+  function viaList() {            // stops still to do, in order
+    return stops.filter(function (s) { return s.pt && !s.done; });
+  }
+  function drawStopMarkers() {
+    stopLayer.clearLayers();
+    stops.forEach(function (s, i) {
+      if (!s.pt) return;
+      L.marker(s.pt, {
+        icon: L.divIcon({
+          className: 'stop-icon' + (s.done ? ' done' : ''),
+          html: '<div>' + (s.done ? '✓' : (i + 1)) + '</div>',
+          iconSize: [26, 26], iconAnchor: [13, 13]
+        }),
+        interactive: false, keyboard: false
+      }).addTo(stopLayer);
+    });
+  }
+  function renumberStops() {
+    stops.forEach(function (s, i) { s.num.textContent = i + 1; });
+  }
+  function resetStops() {
+    stops.forEach(function (s) { s.row.remove(); });
+    stops.length = 0;
+    stopLayer.clearLayers();
+  }
+  function setTripText() {
+    var rt = routeOpts[routeSel];
+    if (!rt) return;
+    var n = viaList().length;
+    tripTextEl.textContent = fmtTrip(rt.distance, rt.duration, rt.delay) +
+      (n ? ' · 📍' + n : '');
+  }
+
+  var leftDest = false;           // with stops: only "arrived" once we have moved away from where we started or from the destination
+  var routeStartPt = null;
+  var routeViaS = [];             // stops this route was built with (legs match these, in order)
+  function markStopDone(s) {
+    if (!s || s.done) return;
+    s.done = true;
+    drawStopMarkers();
+    setTripText();
+    var nm = s.input.value.trim();
+    flash('Stop reached' + (nm ? ': ' + nm : ''), false, 4000);
+    if (steps) speak('Stop reached' + (nm ? ', ' + nm : ''));
+  }
+
   function shortName(r) {
     var parts = String(r.display_name || '').split(',');
     return parts.slice(0, 2).join(',').trim();
@@ -388,7 +440,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 18</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 19</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -565,6 +617,76 @@
     }
   }
 
+  // Saved places (favourites) to pick a stop from
+  function showStopPlaces(s) {
+    resultsEl.innerHTML = '';
+    var places = getPlaces();
+    if (!places.length) {
+      var m = document.createElement('div');
+      m.className = 'msg';
+      m.textContent = 'No saved places yet. Type an address, then tap ⭐ on the stop to save it.';
+      resultsEl.appendChild(m);
+      return;
+    }
+    places.forEach(function (p) {
+      var d = document.createElement('div');
+      d.className = 'res';
+      var left = document.createElement('span');
+      left.className = 'res-name';
+      var t = document.createElement('b');
+      t.textContent = '⭐ ' + p.name;
+      left.appendChild(t);
+      d.appendChild(left);
+      if (lastLatLng) {
+        var dist = document.createElement('span');
+        dist.className = 'res-dist';
+        dist.textContent = fmtDist(distM(lastLatLng.lat, lastLatLng.lng, p.lat, p.lon));
+        d.appendChild(dist);
+      }
+      d.addEventListener('click', function () {
+        s.pt = L.latLng(p.lat, p.lon);
+        s.done = false;
+        s.input.value = p.name;
+        resultsEl.innerHTML = '';
+        go();
+      });
+      resultsEl.appendChild(d);
+    });
+  }
+
+  function addStop() {
+    if (stops.length >= MAX_STOPS) { flash('Up to ' + MAX_STOPS + ' stops', true, 3000); return; }
+    var row = document.createElement('div');
+    row.className = 'row stop-row';
+    row.innerHTML =
+      '<span class="stopnum"></span>' +
+      '<input type="text" placeholder="Stop (pickup)" autocomplete="off" enterkeyhint="search">' +
+      '<button type="button" class="icon-btn s-save" aria-label="Save this stop">⭐</button>' +
+      '<button type="button" class="icon-btn s-del" aria-label="Remove this stop">✕</button>';
+    stopsEl.appendChild(row);
+    var s = { row: row, input: row.querySelector('input'), num: row.querySelector('.stopnum'), pt: null, done: false };
+    stops.push(s);
+    renumberStops();
+    s.input.addEventListener('input', function () { s.pt = null; s.done = false; });
+    s.input.addEventListener('focus', function () { if (!s.input.value.trim()) showStopPlaces(s); });
+    s.input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { s.input.blur(); go(); } });
+    row.querySelector('.s-save').addEventListener('click', function () {
+      if (!s.pt) { flash('Pick the place first, then tap ⭐', true, 3000); return; }
+      showNamePicker(s.pt.lat, s.pt.lng, s.input.value.trim());
+    });
+    row.querySelector('.s-del').addEventListener('click', function () {
+      var i = stops.indexOf(s);
+      if (i >= 0) stops.splice(i, 1);
+      row.remove();
+      renumberStops();
+      drawStopMarkers();
+      resultsEl.innerHTML = '';
+      if (routePts && toPt) go();   // redo the route without it
+    });
+    s.input.focus();
+  }
+  document.getElementById('add-stop').addEventListener('click', addStop);
+
   function pickTo(r) {
     toPt = L.latLng(parseFloat(r.lat), parseFloat(r.lon));
     toEl.value = shortName(r);
@@ -581,6 +703,19 @@
     var fromText = fromEl.value.trim();
     var toText = toEl.value.trim();
     if (fromText && fromText !== MY_LOC && !fromPt) return search(fromText, pickFrom);
+    for (var i = 0; i < stops.length; i++) {
+      var st = stops[i], txt = st.input.value.trim();
+      if (txt && !st.pt) {
+        return search(txt, (function (s) {
+          return function (r) {
+            s.pt = L.latLng(parseFloat(r.lat), parseFloat(r.lon));
+            s.done = false;
+            s.input.value = shortName(r);
+            go();
+          };
+        })(st));
+      }
+    }
     if (!toText) { toEl.focus(); return; }
     if (!toPt) return search(toText, pickTo);
     var start = fromPt || lastLatLng;
@@ -666,6 +801,7 @@
   }
   function turnIcon(st) {
     if (st.type === 'arrive') return '⚑';
+    if (st.type === 'stop') return '📍';
     if (st.type === 'roundabout' || st.type === 'rotary' || st.type === 'roundabout turn') return '⟳';
     switch (st.modifier) {
       case 'left': return '←';
@@ -683,6 +819,7 @@
     var onto = st.name ? ' onto ' + st.name : '';
     var w = turnWord(st.modifier);
     if (st.type === 'arrive') return 'You have arrived';
+    if (st.type === 'stop') return 'Stop at ' + (st.name || 'your stop');
     if (st.type === 'roundabout' || st.type === 'rotary') {
       return 'Take the ' + (st.exit ? ordinal(st.exit) + ' exit' : 'exit') + ' at the roundabout' + onto;
     }
@@ -721,6 +858,17 @@
         });
       });
     });
+    // stops: a leg end is a stop, not the destination; later legs need no "depart"
+    list = list.filter(function (s, i) { return !(i > 0 && s.type === 'depart'); });
+    var vi = 0;
+    list.forEach(function (s, i) {
+      if (s.type === 'arrive' && i < list.length - 1) {
+        s.type = 'stop';
+        s.ref = routeViaS[vi] || null;
+        s.name = s.ref ? s.ref.input.value.trim() : '';
+        vi++;
+      }
+    });
     if (list.length < 2) { navEl.classList.add('hidden'); return; }
     steps = list;
     stepIdx = 1;
@@ -745,8 +893,18 @@
     var st = steps[stepIdx];
     var d = distM(lat, lon, st.lat, st.lon);
     var isLast = st.type === 'arrive';
-    // reached this manoeuvre: move on
-    if (d < 25 && !isLast) {
+    // reached this manoeuvre: move on (a stop also counts as done once we drive past it)
+    var reached = false;
+    if (!isLast) {
+      if (st.type === 'stop') {
+        if (st._min == null || d < st._min) st._min = d;
+        reached = d < 40 || (st._min < 150 && d > st._min + 80);
+      } else {
+        reached = d < 25;
+      }
+    }
+    if (reached) {
+      if (st.type === 'stop' && (d < 40 || st._min < 100)) markStopDone(st.ref);  // drove past but never got close: leave it on the list
       stepIdx++;
       said = {};
       st = steps[stepIdx];
@@ -784,8 +942,10 @@
   var routeCtl = null;
 
   // Ask the route servers in turn (each gets 10 s). Returns the first good route.
-  function fetchOsrm(a, b, signal) {
-    var tail = a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=full&geometries=geojson&steps=true';
+  function fetchOsrm(a, b, signal, via) {
+    var pts = [a].concat(via || [], [b]);
+    var tail = pts.map(function (p) { return p.lng + ',' + p.lat; }).join(';') +
+      '?overview=full&geometries=geojson&steps=true';
     var lastErr = 'no answer';
     function tryServer(i) {
       if (i >= OSRM_SERVERS.length) return Promise.reject(new Error(lastErr));
@@ -819,7 +979,10 @@
   // ---------- TomTom routing: live traffic, fastest route, alternatives ----------
   function mapTT(i) {
     var m = i.maneuver, t = i.instructionType, p = i.point;
-    if (!p || t === 'DIRECTION_INFO' || t === 'LOCATION_WAYPOINT') return null;
+    if (p && (t === 'LOCATION_WAYPOINT' || m === 'WAYPOINT_REACHED')) {
+      return { maneuver: { type: 'arrive', location: [p.longitude, p.latitude] }, name: '' };
+    }
+    if (!p || t === 'DIRECTION_INFO') return null;
     var ang = i.turnAngleInDecimalDegrees || 0;
     var side = ang < -10 ? 'left' : ang > 10 ? 'right' : 'straight';
     var o = { type: 'turn', modifier: 'straight', exit: i.roundaboutExitNumber, location: [p.longitude, p.latitude] };
@@ -875,11 +1038,13 @@
     };
   }
 
-  function fetchTomTomRoutes(a, b, signal, alts, key) {
-    var url = 'https://api.tomtom.com/routing/1/calculateRoute/' + a.lat + ',' + a.lng + ':' + b.lat + ',' + b.lng +
+  function fetchTomTomRoutes(a, b, signal, alts, key, via) {
+    via = via || [];
+    var path = [a].concat(via, [b]).map(function (p) { return p.lat + ',' + p.lng; }).join(':');
+    var url = 'https://api.tomtom.com/routing/1/calculateRoute/' + path +
       '/json?key=' + encodeURIComponent(key) +
       '&traffic=true&routeType=fastest&travelMode=car&computeTravelTimeFor=all&instructionsType=text&language=en-GB' +
-      '&maxAlternatives=' + (alts ? 2 : 0);
+      '&maxAlternatives=' + (alts && !via.length ? 2 : 0);
     var ctl = new AbortController();
     var timer = setTimeout(function () { ctl.abort(); }, 10000);
     signal.addEventListener('abort', function () { ctl.abort(); });
@@ -897,11 +1062,11 @@
   }
 
   // Routes to offer. With a TomTom key: live-traffic fastest + alternatives. Otherwise (or if TomTom fails): free OSRM.
-  function fetchRoutes(a, b, signal, alts) {
+  function fetchRoutes(a, b, signal, alts, via) {
     var key = getKey();
-    var free = function () { return fetchOsrm(a, b, signal).then(function (r) { return [r]; }); };
+    var free = function () { return fetchOsrm(a, b, signal, via).then(function (r) { return [r]; }); };
     if (!key) return free();
-    return fetchTomTomRoutes(a, b, signal, alts, key).then(function (rs) {
+    return fetchTomTomRoutes(a, b, signal, alts, key, via).then(function (rs) {
       if (!rs.length) throw new Error('no route');
       return rs;
     }).catch(function (err) {
@@ -959,7 +1124,7 @@
     var rt = routeOpts[routeSel];
     routePts = rt.geometry.coordinates.map(function (c) { return { lat: c[1], lon: c[0] }; });
     navStart(rt);
-    tripTextEl.textContent = fmtTrip(rt.distance, rt.duration, rt.delay);
+    setTripText();
     tripEl.classList.remove('hidden');
     routeBaseAt = Date.now();
     routeBaseDur = rt.duration;
@@ -973,12 +1138,15 @@
   }
 
   // mode: 'new' (fit map), 'reroute', 'faster' (traffic found a quicker way)
-  function showRoutes(routes, a, b, mode, savedSec) {
+  function showRoutes(routes, a, b, mode, savedSec, viaS) {
     routes.sort(function (x, y) { return x.duration - y.duration; });
     clearRoute();
+    routeViaS = viaS || [];
+    if (mode === 'new') { leftDest = false; routeStartPt = lastLatLng || a; }
     routeOpts = routes;
     routeSel = 0;
     endMarker = L.marker(b, { icon: endIcon, interactive: false, keyboard: false }).addTo(map);
+    drawStopMarkers();
     if (!routeFromGps) {
       startMarker = L.circleMarker(a, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
     }
@@ -1005,7 +1173,9 @@
       if (isReroute) return;          // let the running request finish
       if (routeCtl) routeCtl.abort(); // a new destination replaces a stuck one
     }
-    if (!isReroute && distM(a.lat, a.lng, b.lat, b.lng) < 40) {
+    var viaS = viaList();
+    var via = viaS.map(function (s) { return s.pt; });
+    if (!isReroute && !via.length && distM(a.lat, a.lng, b.lat, b.lng) < 40) {
       flash('You are already here');
       return;
     }
@@ -1013,10 +1183,10 @@
     var ctl = new AbortController();
     routeCtl = ctl;
     if (!isReroute) setStatus('Finding route…');
-    fetchRoutes(a, b, ctl.signal, !isReroute)
+    fetchRoutes(a, b, ctl.signal, !isReroute, via)
       .then(function (routes) {
         if (ctl.signal.aborted) return;
-        showRoutes(routes, a, b, isReroute ? 'reroute' : 'new');
+        showRoutes(routes, a, b, isReroute ? 'reroute' : 'new', 0, viaS);
       })
       .catch(function (err) {
         if (ctl.signal.aborted) return;
@@ -1034,28 +1204,37 @@
     lastTrafficCheck = now;
     var ctl = new AbortController();
     var here = L.latLng(lat, lon), dest = toPt;
-    fetchTomTomRoutes(here, dest, ctl.signal, false, key).then(function (rs) {
+    var viaNowS = viaList();
+    var viaNow = viaNowS.map(function (s) { return s.pt; });
+    fetchTomTomRoutes(here, dest, ctl.signal, false, key, viaNow).then(function (rs) {
       if (!routePts || toPt !== dest || routing || !rs.length) return;
       var left = Math.max(0, routeBaseDur - (Date.now() - routeBaseAt) / 1000);
       var saved = left - rs[0].duration;
-      if (saved >= 120) showRoutes(rs, here, dest, 'faster', saved);
+      if (saved >= 120) showRoutes(rs, here, dest, 'faster', saved, viaNowS);
     }).catch(function () {});
   }
 
   clearEl.addEventListener('click', function () {
     clearRoute();
+    resetStops();
     toPt = null; toEl.value = '';
     fromPt = null; fromEl.value = MY_LOC;
   });
 
   function checkRoute(lat, lon) {
     if (!routePts || !toPt) return;
-    // arrived
-    if (distM(lat, lon, toPt.lat, toPt.lng) < 30) {
+    // reached the next stop?
+    var nx = viaList()[0];
+    if (nx && routeFromGps && distM(lat, lon, nx.pt.lat, nx.pt.lng) < 50) markStopDone(nx);
+    // arrived: not while stops are still to do (unless nav is already on the final leg)
+    if (distM(lat, lon, toPt.lat, toPt.lng) > 100 || (routeStartPt && distM(lat, lon, routeStartPt.lat, routeStartPt.lng) > 150)) leftDest = true;
+    var onFinal = (leftDest || !routeViaS.length) && (!viaList().length || !steps || (steps[stepIdx] && steps[stepIdx].type === 'arrive'));
+    if (onFinal && distM(lat, lon, toPt.lat, toPt.lng) < 30) {
       setStatus('You have arrived');
       setTimeout(function () { setStatus(''); }, 4000);
       var wasNav = !!steps;
       clearRoute();
+      resetStops();
       if (wasNav) speak('You have arrived');
       return;
     }

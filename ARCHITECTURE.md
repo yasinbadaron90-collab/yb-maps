@@ -14,7 +14,7 @@ Plain HTML, CSS and JavaScript. Leaflet (saved in `vendor/`, not loaded from a C
 
 | File | Job |
 |---|---|
-| `index.html` | Page shell: map, From/To bar, results list, next-turn banner, trip bar, status line, speed card with the speed-limit sign |
+| `index.html` | Page shell: map, From/stops/To bar, results list, next-turn banner, trip bar, status line, speed card with the speed-limit sign |
 | `app.js` | All the logic, one IIFE, sections below |
 | `style.css` | All styling |
 | `sw.js` | Service worker: caches the app files, network first. Cross-origin calls (maps, routing, search, traffic) go straight to the network and are never cached |
@@ -27,11 +27,11 @@ Plain HTML, CSS and JavaScript. Leaflet (saved in `vendor/`, not loaded from a C
 1. Arrow marker: the heading arrow for the car
 2. Geometry helpers: `distM`, `bearing`, angle maths
 3. Speed limit: reads the nearest road's `maxspeed` from OpenStreetMap (Overpass). Shows "?" when the road has no limit recorded
-4. Destination search and route: place search (Nominatim) and the free OSRM route
+4. Destination search and route: place search (Nominatim) and the free OSRM route. Includes **stops**: the ➕ button adds pickup rows between From and To (up to 8, in the order listed). Each stop is picked from saved places (shown when its box is focused and empty) or searched, can be saved with ⭐, and removed with ✕. Remaining stops go into the route as via points; a stop counts as done within 50 m, or when the turn steps drive past it within 100 m (grey ✓ marker, spoken "Stop reached"); a stop driven past from further away stays on the list (reroutes go back for it) until picked up or removed with ✕; reroutes only use stops not yet done. With stops, "You have arrived" only fires after the car has moved 150 m from the start or 100 m from To, so a round trip home does not end on the first GPS fix ✕ on the trip bar clears the stops too
 5. Business search key (TomTom): optional key for shops and businesses, pasted by Yasin into Settings
 6. Saved places: Home, Work and favourites
-7. Turn-by-turn: next-turn banner, spoken directions, voice on/off
-8. TomTom routing: live-traffic fastest route and alternatives; falls back to OSRM
+7. Turn-by-turn: next-turn banner, spoken directions, voice on/off. Leg ends that are not the destination become "Stop at …" steps (also dropped once driven past)
+8. TomTom routing: live-traffic fastest route and alternatives (no alternatives when there are stops); falls back to OSRM. Stops are sent as waypoints to both
 9. Speed cameras: from OpenStreetMap, warns about 500 m ahead
 10. Live traffic overlay: TomTom flow tiles
 11. GPS: the position handler that feeds everything above. Touching the map pauses auto-follow for 10 s; the 🎯 recentre button brings it back at once
