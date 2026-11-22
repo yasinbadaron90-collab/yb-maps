@@ -440,7 +440,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 20</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 21</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -926,6 +926,7 @@
     }
   }
 
+  var keepTraffic = false;        // set while a new route replaces the old one (no tile flicker)
   function clearRoute() {
     if (routeLine && routeLine._label) map.removeLayer(routeLine._label);
     if (routeLine && routeLine._extra) map.removeLayer(routeLine._extra);
@@ -938,6 +939,7 @@
     navReset();
     tripEl.classList.add('hidden');
     resultsEl.innerHTML = '';
+    if (!keepTraffic) updateTrafficUi();
   }
 
   var routeCtl = null;
@@ -1139,6 +1141,7 @@
     }
     routeOpts.forEach(function (rt, i) { if (i !== routeSel) addRouteLine(i, false); });
     routeLine = addRouteLine(routeSel, true);
+    updateTrafficUi();
   }
 
   // Make the chosen route the active one: path for off-route checks, voice steps, trip text
@@ -1162,7 +1165,9 @@
   // mode: 'new' (fit map), 'reroute', 'faster' (traffic found a quicker way)
   function showRoutes(routes, a, b, mode, savedSec, viaS) {
     routes.sort(function (x, y) { return x.duration - y.duration; });
+    keepTraffic = true;
     clearRoute();
+    keepTraffic = false;
     routeViaS = viaS || [];
     if (mode === 'new') { leftDest = false; routeStartPt = lastLatLng || a; }
     routeOpts = routes;
@@ -1357,11 +1362,15 @@
     var key = getKey();
     trafficBtn.classList.toggle('hidden', !key);
     trafficBtn.classList.toggle('on', trafficOn && !!key);
-    if (trafficLayer) { map.removeLayer(trafficLayer); trafficLayer = null; }
-    if (key && trafficOn) {
+    // road-by-road traffic tiles only when there is no route; with a route the line itself shows traffic
+    var rt = routeOpts[routeSel];
+    var want = !!key && trafficOn && !(rt && rt.tsec);
+    if (trafficLayer && (!want || trafficLayer._ybKey !== key)) { map.removeLayer(trafficLayer); trafficLayer = null; }
+    if (want && !trafficLayer) {
       trafficLayer = L.tileLayer('https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=' + encodeURIComponent(key), {
         maxZoom: 19, opacity: 0.85
       }).addTo(map);
+      trafficLayer._ybKey = key;
     }
   }
   trafficBtn.addEventListener('click', function () {
