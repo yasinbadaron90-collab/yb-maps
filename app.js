@@ -56,6 +56,7 @@
   var marker = null;
   var heading = 0;       // degrees, 0 = north, clockwise
   var shownHeading = 0;  // unwrapped angle so rotation takes the short way
+  var rotOn = false;     // map turned so the road ahead is at the top (see "Heading-up map")
 
   function setHeading(deg) {
     // keep rotation continuous (avoid spinning 350 -> 10 the long way)
@@ -66,6 +67,7 @@
       var svg = marker.getElement() && marker.getElement().querySelector('svg');
       if (svg) svg.style.transform = 'rotate(' + shownHeading + 'deg)';
     }
+    if (rotOn) setMapRot();
   }
 
   function bearing(a, b) {
@@ -456,7 +458,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 29</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 30</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -956,7 +958,7 @@
     navReset();
     tripEl.classList.add('hidden');
     resultsEl.innerHTML = '';
-    if (!keepTraffic) { editingTrip = false; syncBarMode(); updateTrafficUi(); }
+    if (!keepTraffic) { editingTrip = false; syncBarMode(); updateTrafficUi(); applyRotation(); }
   }
 
   var routeCtl = null;
@@ -1223,6 +1225,8 @@
     renderRoutes();
     applyRoute();
     if (mode === 'new') {
+      previewUntil = Date.now() + 8000;      // overview is north-up; turning starts when it ends
+      applyRotation();
       var bnds = routeLine.getBounds();
       altLayers.eachLayer(function (l) { if (l.getBounds) bnds.extend(l.getBounds()); });
       map.fitBounds(bnds, { padding: [40, 40] });
@@ -1452,6 +1456,7 @@
   var recenterBtn = document.getElementById('recenter');
   function holdFollow() {
     pauseFollowUntil = Math.max(pauseFollowUntil, Date.now() + 10000);
+    if (previewUntil > Date.now()) previewUntil = pauseFollowUntil;   // still reading the overview: don't turn it yet
     recenterBtn.classList.remove('hidden');
   }
   var mapBox = map.getContainer();
@@ -1464,6 +1469,102 @@
     if (lastLatLng) map.setView(lastLatLng, map.getZoom(), { animate: true });
   });
   setInterval(function () { if (Date.now() > pauseFollowUntil) recenterBtn.classList.add('hidden'); }, 1000);
+
+  // ---------- Heading-up map: while driving a route the road ahead is at the top ----------
+  // The map box is made bigger than the screen (so no corners show) and turned with CSS; the arrow's own
+  // rotation then cancels out and it points up. Not used while previewing a route or when north-up is chosen.
+  var NORTH_KEY = 'yb-maps-north';
+  var northLock = false;
+  try { northLock = localStorage.getItem(NORTH_KEY) === '1'; } catch (e) {}
+  var mapEl = document.getElementById('map');
+  var compassEl = document.getElementById('compass');
+  var compassSvg = compassEl.querySelector('svg');
+  var previewUntil = 0;           // route overview showing (north-up) until this time
+  var rotBox = 0;
+  var PIVOT_Y = 0.6;              // arrow sits 60% down the screen (45% sideways) so more road shows ahead
+
+  function wantRot() { return !!(routePts && routeFromGps && lastLatLng && !northLock && Date.now() > previewUntil); }
+  function setRotBox() {
+    var vw = window.innerWidth, vh = window.innerHeight, px = vw / 2, py = vh * (vw > vh ? 0.45 : PIVOT_Y);
+    rotBox = Math.ceil(2 * Math.hypot(Math.max(px, vw - px), Math.max(py, vh - py)));
+    mapEl.style.width = rotBox + 'px';
+    mapEl.style.height = rotBox + 'px';
+    mapEl.style.left = (px - rotBox / 2) + 'px';
+    mapEl.style.top = (py - rotBox / 2) + 'px';
+    mapEl.style.right = 'auto';
+    mapEl.style.bottom = 'auto';
+  }
+  function setMapRot() {
+    mapEl.style.setProperty('--mr', shownHeading);   // markers use it to stay upright
+    mapEl.style.transform = 'rotate(' + (-shownHeading) + 'deg)';
+    compassSvg.style.transform = 'rotate(' + (-shownHeading) + 'deg)';
+  }
+  function applyRotation() {
+    var want = wantRot();
+    compassEl.classList.toggle('hidden', !routePts);
+    compassEl.classList.toggle('on', !northLock);
+    compassEl.setAttribute('aria-pressed', northLock ? 'false' : 'true');
+    document.getElementById('attrib').classList.toggle('hidden', !want);
+    if (want === rotOn) return;
+    var ctr = map.getCenter(), z = map.getZoom();
+    rotOn = want;
+    compassSvg.style.transition = 'none';      // needle jumps, never spins several turns
+    if (want) {
+      setRotBox();
+      setMapRot();
+      void mapEl.offsetWidth;
+      mapEl.classList.add('rot');
+      map.dragging.disable();
+      map.options.touchZoom = 'center';
+      map.options.doubleClickZoom = 'center';
+    } else {
+      mapEl.classList.remove('rot');
+      ['width', 'height', 'left', 'top', 'right', 'bottom', 'transform'].forEach(function (k) { mapEl.style[k] = ''; });
+      mapEl.style.setProperty('--mr', 0);
+      compassSvg.style.transform = '';
+      map.dragging.enable();
+      map.options.touchZoom = true;
+      map.options.doubleClickZoom = true;
+    }
+    void compassSvg.offsetWidth;
+    compassSvg.style.transition = '';
+    map.invalidateSize({ animate: false });
+    map.setView(want && Date.now() > pauseFollowUntil && lastLatLng ? lastLatLng : ctr, z, { animate: false });
+  }
+  compassEl.addEventListener('click', function () {
+    northLock = !northLock;
+    try { localStorage.setItem(NORTH_KEY, northLock ? '1' : '0'); } catch (e) {}
+    applyRotation();
+  });
+  window.addEventListener('resize', function () {
+    if (!rotOn) return;
+    setRotBox();
+    map.invalidateSize({ animate: false });
+  });
+  // a turned map: Leaflet's own drag and tap maths assume north is up, so pan by hand and un-turn taps
+  var panLast = null;
+  mapEl.addEventListener('touchstart', function (e) {
+    panLast = (rotOn && e.touches.length === 1) ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+  }, { passive: true });
+  mapEl.addEventListener('touchmove', function (e) {
+    if (!rotOn || !panLast) return;
+    if (e.touches.length !== 1) { panLast = null; return; }
+    var t = e.touches[0], dx = t.clientX - panLast.x, dy = t.clientY - panLast.y;
+    var a = shownHeading * Math.PI / 180;
+    map.panBy([-(dx * Math.cos(a) - dy * Math.sin(a)), -(dx * Math.sin(a) + dy * Math.cos(a))], { animate: false });
+    panLast = { x: t.clientX, y: t.clientY };
+  }, { passive: true });
+  ['touchend', 'touchcancel'].forEach(function (ev) {
+    mapEl.addEventListener(ev, function () { panLast = null; }, { passive: true });
+  });
+  var origMouseToPoint = map.mouseEventToContainerPoint;
+  map.mouseEventToContainerPoint = function (e) {
+    if (!rotOn) return origMouseToPoint.call(map, e);
+    var r = mapEl.getBoundingClientRect(), a = shownHeading * Math.PI / 180;
+    var dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    return L.point(dx * Math.cos(a) - dy * Math.sin(a) + rotBox / 2, dx * Math.sin(a) + dy * Math.cos(a) + rotBox / 2);
+  };
+  setInterval(applyRotation, 1000);
 
   // ---------- GPS ----------
   var prevPos = null;
@@ -1494,6 +1595,7 @@
     }
 
     lastLatLng = latlng;
+    applyRotation();
     if (firstFix || Date.now() > pauseFollowUntil) {
       var z = (firstFix || resetZoom) ? (routePts ? 16 : 17) : map.getZoom();
       resetZoom = false;

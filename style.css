@@ -214,6 +214,18 @@ html, body {
 .route-label div.sel { background: #2563eb; color: #fff; border-color: #fff; }
 
 .recenter-btn { bottom: 260px; }
+.compass-btn { bottom: 320px; }
+.compass-btn svg { width: 28px; height: 28px; display: block; margin: auto; transition: transform 0.4s linear; }
+
+/* the map's own credit line turns with the map, so a fixed copy is shown while it is turned */
+.attrib { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; z-index: 1000; padding: 1px 6px; font: 10px/12px system-ui, sans-serif; color: #334155; background: rgba(255,255,255,0.8); border-radius: 6px 6px 0 0; white-space: nowrap; }
+.attrib a { color: #1d4ed8; }
+#map.rot .leaflet-control-attribution { display: none; }
+
+/* ---- heading-up map: box size/position are set from app.js ---- */
+#map.rot { touch-action: none; transition: transform 0.4s linear; }
+.cam-icon > div, .stop-icon > div, .route-label > div { transform: rotate(calc(var(--mr, 0) * 1deg)); }
+#map.rot .cam-icon > div, #map.rot .stop-icon > div, #map.rot .route-label > div { transition: transform 0.4s linear; }
 
 /* ---- stops (pickups) ---- */
 .stopnum { width: 20px; height: 20px; border-radius: 50%; flex: none; margin: 0 1px; background: #f59e0b; color: #0f172a; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; }
@@ -234,6 +246,9 @@ html, body {
   .traffic-btn, .recenter-btn { right: calc(env(safe-area-inset-right, 0px) + 12px); }
   .traffic-btn { bottom: 170px; }
   .recenter-btn { bottom: 226px; }
+  .compass-btn { bottom: 282px; }
+  .attrib { top: 0; bottom: auto; left: calc(min(46vw, 440px) + 16px); transform: none; border-radius: 0 0 6px 6px; }
+  #bar.driving ~ .attrib { left: 50%; transform: translateX(-50%); }
 }
 
 /* ---- while a route is showing: only the turn banner and trip row (✎ brings the boxes back) ---- */
