@@ -16,9 +16,9 @@ Plain HTML, CSS and JavaScript. Leaflet (saved in `vendor/`, not loaded from a C
 |---|---|
 | `index.html` | Page shell: map, From/stops/To bar, results list, next-turn banner, trip bar, status line, speed card with the speed-limit sign |
 | `app.js` | All the logic, one IIFE, sections below |
-| `style.css` | All styling. The speed and speed-limit show as two separate round gauges at the bottom corners (like the 🚦 button). Last block is the sideways (landscape phone) layout: controls on the left, map in the middle |
+| `style.css` | All styling. The speed and speed-limit show as two separate round gauges at the bottom corners (like the 🚦 button). Last blocks are the sideways (landscape) layout, only used if the screen is ever turned (e.g. a plain browser tab that ignores the lock), and the folded driving bar |
 | `sw.js` | Service worker: caches the app files, network first. Cross-origin calls (maps, routing, search, traffic) go straight to the network and are never cached |
-| `manifest.webmanifest` | Phone-app install details (name, icons, colours); `orientation: any` so the screen can rotate |
+| `manifest.webmanifest` | Phone-app install details (name, icons, colours); `orientation: portrait` keeps the installed app upright (app.js also calls `screen.orientation.lock('portrait')`) |
 | `icons/` | App icons, 192 and 512 |
 | `vendor/` | Leaflet JS, CSS and marker images |
 

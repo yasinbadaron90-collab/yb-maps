@@ -1,5 +1,5 @@
 // Bump CACHE_VERSION on every change to a cached file.
-var CACHE_VERSION = 'yb-maps-v26';
+var CACHE_VERSION = 'yb-maps-v27';
 var SHELL = [
   './',
   'index.html',

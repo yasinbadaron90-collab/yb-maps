@@ -456,7 +456,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 26</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 27</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -1547,6 +1547,11 @@
   document.addEventListener('touchstart', function () { if (!wakeLock) requestWake(); }, { passive: true });
 
   // ---------- Service worker ----------
+  // keep the screen upright (works in the installed app; a plain browser tab ignores it)
+  try {
+    if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(function () {});
+  } catch (e) {}
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('sw.js').catch(function () {});
