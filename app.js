@@ -7,8 +7,8 @@
     'https://overpass.private.coffee/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter'
   ];
-  var LIMIT_MIN_MOVE_M = 40;     // re-query after moving this far
-  var LIMIT_MIN_INTERVAL_MS = 8000;
+  var LIMIT_REFETCH_M = 150;     // re-fetch the road list after moving this far from where it was fetched
+  var LIMIT_MIN_INTERVAL_MS = 3000;
   var HEADING_MIN_SPEED = 1.5;   // m/s, below this GPS heading is unreliable
   var DRIVABLE = {
     motorway: 1, motorway_link: 1, trunk: 1, trunk_link: 1,
@@ -111,18 +111,20 @@
     return n;
   }
 
-  var lastQuery = { lat: null, lon: null, time: 0 };
+  var lastQuery = { time: 0 };
   var queryBusy = false;
-  var currentLimit = null;
+  var currentLimit;                // undefined until the first limit is known
 
   function showLimit(val) {
     currentLimit = val;
     if (val == null) {
       limitValEl.textContent = '?';
       limitEl.classList.add('unknown');
+      limitEl.classList.remove('three');
     } else {
       limitValEl.textContent = val;
       limitEl.classList.remove('unknown');
+      limitEl.classList.toggle('three', String(val).length > 2);
     }
   }
 
@@ -146,34 +148,59 @@
     return tryAt(0);
   }
 
-  function lookupLimit(lat, lon) {
+  // The limits of every road within 500 m are fetched in one go and kept; each GPS fix then just picks the nearest
+  // road from that list (instant), so a new limit shows as soon as you turn into a road. Re-fetched every ~200 m.
+  var limitCache = null;           // {lat, lon, ways}
+  var limitFails = 0, limitPend = undefined, limitPendN = 0;
+  var ROAD_RE = '^(' + Object.keys(DRIVABLE).join('|') + ')$';
+  // moving = true: ignore roads running across our heading (side streets, junction crossings)
+  function pickLimit(lat, lon, moving) {
+    var p = { lat: lat, lon: lon }, best = null, bestD = 30;
+    limitCache.ways.forEach(function (w) {
+      for (var i = 0; i < w.geometry.length - 1; i++) {
+        var g0 = w.geometry[i], g1 = w.geometry[i + 1];
+        var d = distToSegM(p, g0, g1);
+        if (d >= bestD) continue;
+        if (moving) {
+          var b = bearing({ lat: g0.lat, lng: g0.lon }, { lat: g1.lat, lng: g1.lon });
+          if (Math.min(angDiff(b, heading), angDiff(b + 180, heading)) > 50) continue;
+        }
+        bestD = d; best = w;
+      }
+    });
+    if (!best) return;                       // no road close by (GPS drift): keep what is showing
+    var val = parseMaxspeed(best.tags.maxspeed);
+    if (currentLimit === undefined || val === currentLimit) { limitPend = val; limitPendN = 0; showLimit(val); return; }
+    // a different value must win two fixes in a row before the sign changes (no flicker at junctions)
+    if (val === limitPend) limitPendN++; else { limitPend = val; limitPendN = 1; }
+    if (limitPendN >= 2) showLimit(val);
+  }
+  function lookupLimit(lat, lon, moving) {
     var now = Date.now();
-    if (queryBusy) return;
-    if (lastQuery.lat !== null) {
-      var moved = distM(lastQuery.lat, lastQuery.lon, lat, lon);
-      if (moved < LIMIT_MIN_MOVE_M || now - lastQuery.time < LIMIT_MIN_INTERVAL_MS) return;
-    }
+    var off = limitCache ? distM(limitCache.lat, limitCache.lon, lat, lon) : Infinity;
+    if (limitCache && off < 450) pickLimit(lat, lon, moving);
+    else if (limitCache && off >= 480) showLimit(null);          // road list too far behind to trust
+    var wait = Math.min(30000, LIMIT_MIN_INTERVAL_MS * Math.pow(2, limitFails));
+    if (queryBusy || off < LIMIT_REFETCH_M || now - lastQuery.time < wait) return;
     queryBusy = true;
-    lastQuery = { lat: lat, lon: lon, time: now };
+    lastQuery = { time: now };
 
-    var q = '[out:json][timeout:10];way(around:30,' + lat.toFixed(6) + ',' + lon.toFixed(6) +
-            ')[highway];out tags geom;';
+    var q = '[out:json][timeout:10];way(around:500,' + lat.toFixed(6) + ',' + lon.toFixed(6) +
+            ')[highway~"' + ROAD_RE + '"];out tags geom;';
     overpass(q, 8000)
       .then(function (data) {
-        var p = { lat: lat, lon: lon };
-        var best = null, bestD = Infinity;
-        (data.elements || []).forEach(function (w) {
-          if (!w.geometry || !w.tags || !DRIVABLE[w.tags.highway]) return;
-          for (var i = 0; i < w.geometry.length - 1; i++) {
-            var d = distToSegM(p, w.geometry[i], w.geometry[i + 1]);
-            if (d < bestD) { bestD = d; best = w; }
-          }
-        });
-        showLimit(best ? parseMaxspeed(best.tags.maxspeed) : null);
+        limitFails = 0;
+        limitCache = {
+          lat: lat, lon: lon,
+          ways: (data.elements || []).filter(function (w) {
+            return w.geometry && w.tags && DRIVABLE[w.tags.highway];
+          })
+        };
+        var at = lastLatLng || { lat: lat, lng: lon };
+        pickLimit(at.lat, at.lng, moving);
       })
       .catch(function () {
-        // keep last value on network trouble; nothing to guess
-        lastQuery.time = Date.now() - LIMIT_MIN_INTERVAL_MS + 3000; // retry soon
+        limitFails = Math.min(limitFails + 1, 4);   // back off: 3, 6, 12, 24, 30 s
       })
       .then(function () {
         queryBusy = false;
@@ -458,7 +485,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 30</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 31</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -1605,7 +1632,7 @@
     firstFix = false;
 
     if (gpsStatus) { gpsStatus = false; setStatus(''); }
-    lookupLimit(c.latitude, c.longitude);
+    lookupLimit(c.latitude, c.longitude, moving);
     fetchCams(c.latitude, c.longitude);
     checkCams(c.latitude, c.longitude, c.speed, kmh);
     checkRoute(c.latitude, c.longitude);
