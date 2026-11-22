@@ -216,6 +216,9 @@
   var routeOpts = [], routeSel = 0;            // routes on offer, and which one is blue
   var routeBaseAt = 0, routeBaseDur = 0, lastTrafficCheck = 0;
   var routePts = null;         // [{lat, lon}]
+  var routeCum = null;         // metres along the route at each point
+  var routeIdx = 0;            // where we are along routePts
+  var tripFrac = 1;            // share of the route still to drive (1 = all)
   var routeFromGps = true;
   var offSince = 0, lastReroute = 0, routing = false;
   var pauseFollowUntil = 0;
@@ -260,8 +263,11 @@
     var rt = routeOpts[routeSel];
     if (!rt) return;
     var n = viaList().length;
-    tripTextEl.textContent = fmtTrip(rt.distance, rt.duration, rt.delay) +
-      (n ? ' · 📍' + n : '');
+    var dur = rt.duration * tripFrac;
+    var eta = new Date(Date.now() + dur * 1000);
+    var hh = ('0' + eta.getHours()).slice(-2) + ':' + ('0' + eta.getMinutes()).slice(-2);
+    tripTextEl.textContent = fmtTrip(rt.distance * tripFrac, dur, (rt.delay || 0) * tripFrac) +
+      ' · ' + hh + (n ? ' · 📍' + n : '');
   }
 
   var leftDest = false;           // with stops: only "arrived" once we have moved away from where we started or from the destination
@@ -450,7 +456,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 24</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 25</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -1159,6 +1165,12 @@
   function applyRoute() {
     var rt = routeOpts[routeSel];
     routePts = rt.geometry.coordinates.map(function (c) { return { lat: c[1], lon: c[0] }; });
+    routeCum = [0];
+    for (var k = 1; k < routePts.length; k++) {
+      routeCum.push(routeCum[k - 1] + distM(routePts[k - 1].lat, routePts[k - 1].lon, routePts[k].lat, routePts[k].lon));
+    }
+    routeIdx = 0;
+    tripFrac = 1;
     navStart(rt);
     setTripText();
     tripEl.classList.remove('hidden');
@@ -1260,6 +1272,28 @@
     fromPt = null; fromEl.value = MY_LOC;
   });
 
+  // km and time left shrink as we drive (nearest point ahead of where we last were)
+  function updateProgress(lat, lon) {
+    if (!routePts || !routeCum || routePts.length < 2) return;
+    var best = -1, bestD = Infinity;
+    function scan(from, to) {
+      for (var i = from; i <= to; i++) {
+        var d = distM(lat, lon, routePts[i].lat, routePts[i].lon);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+    }
+    scan(Math.max(0, routeIdx - 10), Math.min(routePts.length - 1, routeIdx + 400));
+    if (bestD > 200) scan(0, routePts.length - 1);   // after a GPS gap we may be far ahead: look at the whole route
+    if (best < 0 || bestD > 200) return;          // off the route: a reroute will reset this
+    routeIdx = best;
+    var total = routeCum[routeCum.length - 1];
+    var frac = total > 0 ? (total - routeCum[best]) / total : 0;
+    if (Math.abs(frac - tripFrac) < 0.0005 && Date.now() - tripTick < 20000) return;
+    tripFrac = frac;
+    tripTick = Date.now();
+    setTripText();
+  }
+  var tripTick = 0;
   function checkRoute(lat, lon) {
     if (!routePts || !toPt) return;
     // reached the next stop?
@@ -1278,6 +1312,7 @@
       return;
     }
     if (!routeFromGps) return; // custom start: no rerouting
+    updateProgress(lat, lon);
     var p = { lat: lat, lon: lon }, min = Infinity;
     for (var i = 0; i < routePts.length - 1; i++) {
       var d = distToSegM(p, routePts[i], routePts[i + 1]);
