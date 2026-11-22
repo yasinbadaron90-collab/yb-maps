@@ -456,7 +456,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 27</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 28</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -1547,10 +1547,29 @@
   document.addEventListener('touchstart', function () { if (!wakeLock) requestWake(); }, { passive: true });
 
   // ---------- Service worker ----------
-  // keep the screen upright (works in the installed app; a plain browser tab ignores it)
-  try {
-    if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(function () {});
-  } catch (e) {}
+  // keep the screen upright. Android only honours the lock for an installed app or in full screen,
+  // so if the plain lock is refused, go full screen on a tap and lock then.
+  var uprightOk = false, triedFs = false;
+  function keepUpright() {
+    try {
+      var o = screen.orientation;
+      if (!o || !o.lock) return;
+      if (uprightOk && o.type && o.type.indexOf('portrait') === 0) return;
+      var lockIt = function () { return o.lock('portrait').then(function () { uprightOk = true; }); };
+      lockIt().catch(function () {
+        var el = document.documentElement;
+        var touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+        if (touch && !triedFs && !document.fullscreenElement && el.requestFullscreen) {
+          triedFs = true;                       // once only: never fight the back gesture
+          var p = el.requestFullscreen();
+          if (p && p.then) p.then(lockIt).catch(function () {});
+        }
+      });
+    } catch (e) {}
+  }
+  keepUpright();
+  document.addEventListener('click', keepUpright);
+  document.addEventListener('touchend', keepUpright, { passive: true });
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
