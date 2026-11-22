@@ -440,7 +440,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 19</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 20</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -928,6 +928,7 @@
 
   function clearRoute() {
     if (routeLine && routeLine._label) map.removeLayer(routeLine._label);
+    if (routeLine && routeLine._extra) map.removeLayer(routeLine._extra);
     [routeLine, endMarker, startMarker].forEach(function (l) { if (l) map.removeLayer(l); });
     routeLine = endMarker = startMarker = null;
     altLayers.clearLayers();
@@ -1028,8 +1029,15 @@
     if (coords.length && steps[steps.length - 1].maneuver.type !== 'arrive') {
       steps.push({ maneuver: { type: 'arrive', location: coords[coords.length - 1] }, name: '' });
     }
+    var tsec = [];
+    (r.sections || []).forEach(function (x) {
+      if (x.sectionType === 'TRAFFIC' && x.magnitudeOfDelay > 0) {
+        tsec.push({ s: x.startPointIndex, e: x.endPointIndex, mag: x.magnitudeOfDelay });
+      }
+    });
     var sm = r.summary || {};
     return {
+      tsec: tsec,            // jam stretches along the route (TomTom only); [] = flowing
       geometry: { coordinates: coords },
       distance: sm.lengthInMeters,
       duration: sm.travelTimeInSeconds,
@@ -1043,7 +1051,7 @@
     var path = [a].concat(via, [b]).map(function (p) { return p.lat + ',' + p.lng; }).join(':');
     var url = 'https://api.tomtom.com/routing/1/calculateRoute/' + path +
       '/json?key=' + encodeURIComponent(key) +
-      '&traffic=true&routeType=fastest&travelMode=car&computeTravelTimeFor=all&instructionsType=text&language=en-GB' +
+      '&traffic=true&routeType=fastest&travelMode=car&computeTravelTimeFor=all&sectionType=traffic&instructionsType=text&language=en-GB' +
       '&maxAlternatives=' + (alts && !via.length ? 2 : 0);
     var ctl = new AbortController();
     var timer = setTimeout(function () { ctl.abort(); }, 10000);
@@ -1087,9 +1095,21 @@
   function addRouteLine(i, sel) {
     var rt = routeOpts[i];
     var latlngs = rt.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
+    // with live traffic: the chosen route is green where it flows, yellow/orange/red where it is slow
+    var live = sel && trafficOn && !!rt.tsec;
     var line = L.polyline(latlngs, {
-      color: sel ? '#2563eb' : '#94a3b8', weight: sel ? 7 : 6, opacity: sel ? 0.9 : 0.85
+      color: sel ? (live ? '#16a34a' : '#2563eb') : '#94a3b8', weight: sel ? 7 : 6, opacity: sel ? 0.95 : 0.85
     });
+    if (live && rt.tsec.length) {
+      var extra = L.layerGroup();
+      rt.tsec.forEach(function (x) {
+        var part = latlngs.slice(x.s, x.e + 1);
+        if (part.length < 2) return;
+        var col = x.mag === 1 ? '#eab308' : x.mag === 2 ? '#f97316' : x.mag === 3 ? '#dc2626' : '#7f1d1d';
+        L.polyline(part, { color: col, weight: 8, opacity: 1 }).addTo(extra);
+      });
+      line._extra = extra;
+    }
     if (routeOpts.length > 1) {
       var mid = latlngs[Math.floor(latlngs.length / 2)];
       var label = L.marker(mid, {
@@ -1104,7 +1124,8 @@
       if (sel) label.addTo(map); else label.addTo(altLayers);
       line._label = label;
     }
-    if (sel) line.addTo(map); else { line.addTo(altLayers); line.on('click', function () { selectRoute(i); }); }
+    if (sel) { line.addTo(map); if (line._extra) line._extra.addTo(map); }
+    else { line.addTo(altLayers); line.on('click', function () { selectRoute(i); }); }
     return line;
   }
 
@@ -1112,6 +1133,7 @@
     altLayers.clearLayers();
     if (routeLine) {
       if (routeLine._label) map.removeLayer(routeLine._label);
+      if (routeLine._extra) map.removeLayer(routeLine._extra);
       map.removeLayer(routeLine);
       routeLine = null;
     }
@@ -1346,6 +1368,7 @@
     trafficOn = !trafficOn;
     try { localStorage.setItem(TRAFFIC_KEY, trafficOn ? '1' : '0'); } catch (e) {}
     updateTrafficUi();
+    if (routeOpts.length) renderRoutes();
   });
   updateTrafficUi();
 

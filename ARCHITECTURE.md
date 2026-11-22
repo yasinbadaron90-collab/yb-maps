@@ -31,9 +31,9 @@ Plain HTML, CSS and JavaScript. Leaflet (saved in `vendor/`, not loaded from a C
 5. Business search key (TomTom): optional key for shops and businesses, pasted by Yasin into Settings
 6. Saved places: Home, Work and favourites
 7. Turn-by-turn: next-turn banner, spoken directions, voice on/off. Leg ends that are not the destination become "Stop at …" steps (also dropped once driven past)
-8. TomTom routing: live-traffic fastest route and alternatives (no alternatives when there are stops); falls back to OSRM. Stops are sent as waypoints to both
+8. TomTom routing: live-traffic fastest route and alternatives (no alternatives when there are stops); falls back to OSRM. Stops are sent as waypoints to both. TomTom is asked for `sectionType=traffic`; with the 🚦 switch on, the chosen route is drawn green and the slow stretches are painted over it (yellow minor, orange moderate, red major, dark red closed). Switch off, or a free OSRM route, gives the plain blue line
 9. Speed cameras: from OpenStreetMap, warns about 500 m ahead
-10. Live traffic overlay: TomTom flow tiles
+10. Live traffic overlay: TomTom flow tiles on the map; the 🚦 button also switches the route colouring (see 8)
 11. GPS: the position handler that feeds everything above. Touching the map pauses auto-follow for 10 s; the 🎯 recentre button brings it back at once
 12. Keep screen awake: Screen Wake Lock
 13. Service worker registration
