@@ -195,6 +195,16 @@
   var tripEl = document.getElementById('trip');
   var tripTextEl = document.getElementById('trip-text');
   var clearEl = document.getElementById('clear');
+  // While a route is showing, fold the From/To boxes away (like Google) so the map stays visible; ✎ opens them again
+  var barEl = document.getElementById('bar');
+  var editingTrip = false;
+  function syncBarMode() {
+    barEl.classList.toggle('driving', !tripEl.classList.contains('hidden') && !editingTrip);
+  }
+  document.getElementById('edit-trip').addEventListener('click', function () {
+    editingTrip = !editingTrip;
+    syncBarMode();
+  });
 
   var MY_LOC = 'My location';
   var hereEl = document.getElementById('here');
@@ -440,7 +450,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 22</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 23</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -539,6 +549,7 @@
 
   document.getElementById('save-place').addEventListener('click', function () {
     if (!toPt) return;
+    editingTrip = true; syncBarMode();     // the name picker shows in the results area, which is folded while driving
     showNamePicker(toPt.lat, toPt.lng, '');
   });
 
@@ -939,7 +950,7 @@
     navReset();
     tripEl.classList.add('hidden');
     resultsEl.innerHTML = '';
-    if (!keepTraffic) updateTrafficUi();
+    if (!keepTraffic) { editingTrip = false; syncBarMode(); updateTrafficUi(); }
   }
 
   var routeCtl = null;
@@ -1151,6 +1162,7 @@
     navStart(rt);
     setTripText();
     tripEl.classList.remove('hidden');
+    syncBarMode();
     routeBaseAt = Date.now();
     routeBaseDur = rt.duration;
   }
@@ -1169,7 +1181,7 @@
     clearRoute();
     keepTraffic = false;
     routeViaS = viaS || [];
-    if (mode === 'new') { leftDest = false; routeStartPt = lastLatLng || a; }
+    if (mode === 'new') { leftDest = false; routeStartPt = lastLatLng || a; editingTrip = false; }
     routeOpts = routes;
     routeSel = 0;
     endMarker = L.marker(b, { icon: endIcon, interactive: false, keyboard: false }).addTo(map);
