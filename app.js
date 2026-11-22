@@ -485,7 +485,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 31</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 32</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -1500,9 +1500,9 @@
   // ---------- Heading-up map: while driving a route the road ahead is at the top ----------
   // The map box is made bigger than the screen (so no corners show) and turned with CSS; the arrow's own
   // rotation then cancels out and it points up. Not used while previewing a route or when north-up is chosen.
-  var NORTH_KEY = 'yb-maps-north';
-  var northLock = false;
-  try { northLock = localStorage.getItem(NORTH_KEY) === '1'; } catch (e) {}
+  var HEADUP_KEY = 'yb-maps-headup';   // '1' = turn the map to the driving direction (default: north-up, labels always upright)
+  var northLock = true;
+  try { northLock = localStorage.getItem(HEADUP_KEY) !== '1'; } catch (e) {}
   var mapEl = document.getElementById('map');
   var compassEl = document.getElementById('compass');
   var compassSvg = compassEl.querySelector('svg');
@@ -1560,7 +1560,7 @@
   }
   compassEl.addEventListener('click', function () {
     northLock = !northLock;
-    try { localStorage.setItem(NORTH_KEY, northLock ? '1' : '0'); } catch (e) {}
+    try { localStorage.setItem(HEADUP_KEY, northLock ? '0' : '1'); } catch (e) {}
     applyRotation();
   });
   window.addEventListener('resize', function () {
