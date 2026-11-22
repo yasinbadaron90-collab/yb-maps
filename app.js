@@ -456,7 +456,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 25</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 26</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -1111,6 +1111,24 @@
     return fmtDur(rt.duration) + (rt.delay >= 60 ? ' · +' + Math.round(rt.delay / 60) : '');
   }
 
+  function drawTrafficParts(group, latlngs, tsec, from) {
+    tsec.forEach(function (x) {
+      if (x.e <= from) return;
+      var part = latlngs.slice(Math.max(x.s, from), x.e + 1);
+      if (part.length < 2) return;
+      var col = x.mag === 1 ? '#eab308' : x.mag === 2 ? '#f97316' : x.mag === 3 ? '#dc2626' : '#7f1d1d';
+      L.polyline(part, { color: col, weight: 8, opacity: 1 }).addTo(group);
+    });
+  }
+  // the part of the route already driven is not drawn any more
+  var lastTrimIdx = 0;
+  function trimRouteLine() {
+    var ln = routeLine;
+    if (!ln || !ln._ll) return;
+    ln.setLatLngs(ln._ll.slice(routeIdx));
+    if (ln._extra) { ln._extra.clearLayers(); drawTrafficParts(ln._extra, ln._ll, ln._tsec, routeIdx); }
+    lastTrimIdx = routeIdx;
+  }
   function addRouteLine(i, sel) {
     var rt = routeOpts[i];
     var latlngs = rt.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
@@ -1119,14 +1137,11 @@
     var line = L.polyline(latlngs, {
       color: sel ? (live ? '#16a34a' : '#2563eb') : '#94a3b8', weight: sel ? 7 : 6, opacity: sel ? 0.95 : 0.85
     });
+    line._ll = latlngs;
+    line._tsec = rt.tsec || [];
     if (live && rt.tsec.length) {
       var extra = L.layerGroup();
-      rt.tsec.forEach(function (x) {
-        var part = latlngs.slice(x.s, x.e + 1);
-        if (part.length < 2) return;
-        var col = x.mag === 1 ? '#eab308' : x.mag === 2 ? '#f97316' : x.mag === 3 ? '#dc2626' : '#7f1d1d';
-        L.polyline(part, { color: col, weight: 8, opacity: 1 }).addTo(extra);
-      });
+      drawTrafficParts(extra, latlngs, rt.tsec, 0);
       line._extra = extra;
     }
     if (routeOpts.length > 1) {
@@ -1158,6 +1173,8 @@
     }
     routeOpts.forEach(function (rt, i) { if (i !== routeSel) addRouteLine(i, false); });
     routeLine = addRouteLine(routeSel, true);
+    lastTrimIdx = 0;
+    if (routeIdx > 0) trimRouteLine();
     updateTrafficUi();
   }
 
@@ -1182,6 +1199,7 @@
   function selectRoute(i) {
     if (i === routeSel || !routeOpts[i]) return;
     routeSel = i;
+    routeIdx = 0;
     renderRoutes();
     applyRoute();
   }
@@ -1201,6 +1219,7 @@
     if (!routeFromGps) {
       startMarker = L.circleMarker(a, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
     }
+    routeIdx = 0;
     renderRoutes();
     applyRoute();
     if (mode === 'new') {
@@ -1286,6 +1305,7 @@
     if (bestD > 200) scan(0, routePts.length - 1);   // after a GPS gap we may be far ahead: look at the whole route
     if (best < 0 || bestD > 200) return;          // off the route: a reroute will reset this
     routeIdx = best;
+    if (routeIdx - lastTrimIdx >= 3 || routeIdx < lastTrimIdx) trimRouteLine();
     var total = routeCum[routeCum.length - 1];
     var frac = total > 0 ? (total - routeCum[best]) / total : 0;
     if (Math.abs(frac - tripFrac) < 0.0005 && Date.now() - tripTick < 20000) return;

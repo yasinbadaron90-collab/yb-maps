@@ -34,7 +34,7 @@ Plain HTML, CSS and JavaScript. Leaflet (saved in `vendor/`, not loaded from a C
 8. TomTom routing: live-traffic fastest route and alternatives (no alternatives when there are stops); falls back to OSRM. Stops are sent as waypoints to both. TomTom is asked for `sectionType=traffic`; with the 🚦 switch on, the chosen route is drawn green and the slow stretches are painted over it (yellow minor, orange moderate, red major, dark red closed). Switch off, or a free OSRM route, gives the plain blue line
 9. Speed cameras: from OpenStreetMap, warns about 500 m ahead
 10. Live traffic overlay: TomTom flow tiles on the map, shown only while there is no route (with a route the coloured route line, see 8, replaces them); the 🚦 button switches both
-11. GPS: the position handler that feeds everything above. The map never rotates (always north up); only the arrow turns. The trip row's km, time and arrival clock shrink as you drive (`updateProgress`: nearest route point ahead of the last one, time scaled by the share of route left; resets with each new route) Touching the map pauses auto-follow for 10 s; the 🎯 recentre button brings it back at once
+11. GPS: the position handler that feeds everything above. The map never rotates (always north up); only the arrow turns. The trip row's km, time and arrival clock shrink as you drive (`updateProgress`: nearest route point ahead of the last one, time scaled by the share of route left; resets with each new route). The same progress point trims the route line, so the stretch already driven disappears (`trimRouteLine`) Touching the map pauses auto-follow for 10 s; the 🎯 recentre button brings it back at once
 12. Keep screen awake: Screen Wake Lock
 13. Service worker registration
 
