@@ -104,10 +104,13 @@
   function parseMaxspeed(raw) {
     if (!raw) return null;
     var s = String(raw).trim().toLowerCase();
-    var m = s.match(/^(\d+)\s*(mph)?$/);
-    if (!m) return null; // "none", "signals", "ZA:urban" etc -> unknown, never guess
+    // "ZA:urban" etc: the legal default for that kind of road, written instead of a number (same table CoMaps uses)
+    var imp = { 'za:urban': 60, 'za:rural': 100, 'za:motorway': 120 };
+    if (imp[s] != null) return imp[s];
+    var m = s.match(/^(\d+)\s*(mph|km\/h|kmh|kph)?$/);
+    if (!m) return null; // "none", "signals" etc -> unknown, never guess
     var n = parseInt(m[1], 10);
-    if (m[2]) n = Math.round(n * 1.609344);
+    if (m[2] === 'mph') n = Math.round(n * 1.609344);
     return n;
   }
 
@@ -192,22 +195,35 @@
   var limitFails = 0, limitPend = undefined, limitPendN = 0;
   var ROAD_RE = '^(' + Object.keys(DRIVABLE).join('|') + ')$';
   // moving = true: ignore roads running across our heading (side streets, junction crossings)
+  // The number for a road: maxspeed, else the direction-specific one, else the legal default named in
+  // maxspeed:type / source:maxspeed (e.g. "ZA:urban"). forward: true/false = travelling with/against the way's drawn direction.
+  function wayLimit(t, forward) {
+    var v = parseMaxspeed(t.maxspeed);
+    if (v == null && forward != null) v = parseMaxspeed(forward ? t['maxspeed:forward'] : t['maxspeed:backward']);
+    if (v == null && forward == null && (t['maxspeed:forward'] || t['maxspeed:backward'])) {
+      // standing still: direction unknown. Same number both ways is fine; otherwise keep what the sign shows
+      var fv = parseMaxspeed(t['maxspeed:forward']), bv = parseMaxspeed(t['maxspeed:backward']);
+      return fv != null && fv === bv ? fv : undefined;
+    }
+    if (v == null) v = parseMaxspeed(t['maxspeed:type']);
+    if (v == null) v = parseMaxspeed(t['source:maxspeed']);
+    return v;
+  }
   function pickLimit(lat, lon, moving) {
-    var p = { lat: lat, lon: lon }, best = null, bestD = 30;
+    var p = { lat: lat, lon: lon }, best = null, bestD = 30, bestB = 0;
     limitCache.ways.forEach(function (w) {
       for (var i = 0; i < w.geometry.length - 1; i++) {
         var g0 = w.geometry[i], g1 = w.geometry[i + 1];
         var d = distToSegM(p, g0, g1);
         if (d >= bestD) continue;
-        if (moving) {
-          var b = bearing({ lat: g0.lat, lng: g0.lon }, { lat: g1.lat, lng: g1.lon });
-          if (Math.min(angDiff(b, heading), angDiff(b + 180, heading)) > 50) continue;
-        }
-        bestD = d; best = w;
+        var b = bearing({ lat: g0.lat, lng: g0.lon }, { lat: g1.lat, lng: g1.lon });
+        if (moving && Math.min(angDiff(b, heading), angDiff(b + 180, heading)) > 50) continue;
+        bestD = d; best = w; bestB = b;
       }
     });
     if (!best) return;                       // no road close by (GPS drift): keep what is showing
-    var val = parseMaxspeed(best.tags.maxspeed);
+    var val = wayLimit(best.tags, moving ? angDiff(bestB, heading) < 90 : null);
+    if (val === undefined) return;                           // one-way-only limits and we are not moving: keep the sign
     if (val == null) {                                       // OSM has no limit here: ask TomTom (once per road stretch)
       val = ttFallback(lat, lon, moving, best.id);
       if (val === undefined) return;                         // answer pending: keep the sign as it is
@@ -530,7 +546,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 36</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 37</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
