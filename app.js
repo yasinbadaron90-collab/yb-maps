@@ -150,6 +150,44 @@
 
   // The limits of every road within 500 m are fetched in one go and kept; each GPS fix then just picks the nearest
   // road from that list (instant), so a new limit shows as soon as you turn into a road. Re-fetched every ~200 m.
+  // Second opinion from TomTom (posted limit "where available") for roads OpenStreetMap has no limit for.
+  var ttLimit = null;               // {lat, lon, way, val} last answer (val null = TomTom doesn't know either)
+  var ttBusy = false, ttLastTry = 0, ttFails = 0;
+  var TT_REUSE_M = 300;             // an answer holds for this far along the same OSM road
+  function parseTtLimit(s) {
+    var m = String(s || '').match(/^([\d.]+)\s*(MPH|KPH)?/i);
+    if (!m) return null;
+    var n = parseFloat(m[1]);
+    if (!isFinite(n) || n <= 0) return null;
+    return Math.round(/MPH/i.test(m[2] || '') ? n * 1.609344 : n);
+  }
+  // number = TomTom's limit, null = no limit known / no key, undefined = asking right now (keep what the sign shows)
+  function ttFallback(lat, lon, moving, wayId) {
+    var key = getKey();
+    if (!key) return null;
+    var near = ttLimit && ttLimit.way === wayId && distM(ttLimit.lat, ttLimit.lon, lat, lon) < (wayId == null ? 120 : TT_REUSE_M);
+    if (near) return ttLimit.val;
+    var wait = Math.min(60000, 5000 * Math.pow(2, ttFails));
+    if (!ttBusy && Date.now() - ttLastTry > wait) {
+      ttBusy = true; ttLastTry = Date.now();
+      var url = 'https://api.tomtom.com/search/2/reverseGeocode/' + lat.toFixed(6) + ',' + lon.toFixed(6) +
+        '.json?key=' + encodeURIComponent(key) + '&returnSpeedLimit=true&radius=30' +
+        (moving ? '&heading=' + Math.round(heading) : '');
+      fetch(url).then(function (r) { if (!r.ok) throw new Error('TomTom ' + r.status); return r.json(); })
+        .then(function (d) {
+          ttFails = 0;
+          var ad = d && d.addresses && d.addresses[0] && d.addresses[0].address;
+          ttLimit = { lat: lat, lon: lon, way: wayId, val: ad ? parseTtLimit(ad.speedLimit) : null };
+          var at = lastLatLng || { lat: lat, lng: lon };
+          if (limitCache && distM(limitCache.lat, limitCache.lon, at.lat, at.lng) < 450) pickLimit(at.lat, at.lng, moving);
+          else if (!limitCache && ttLimit.val != null) showLimit(ttLimit.val);
+        })
+        .catch(function () { ttFails = Math.min(ttFails + 1, 4); })
+        .then(function () { ttBusy = false; });
+    }
+    return ttBusy ? undefined : null;
+  }
+
   var limitCache = null;           // {lat, lon, ways}
   var limitFails = 0, limitPend = undefined, limitPendN = 0;
   var ROAD_RE = '^(' + Object.keys(DRIVABLE).join('|') + ')$';
@@ -170,6 +208,10 @@
     });
     if (!best) return;                       // no road close by (GPS drift): keep what is showing
     var val = parseMaxspeed(best.tags.maxspeed);
+    if (val == null) {                                       // OSM has no limit here: ask TomTom (once per road stretch)
+      val = ttFallback(lat, lon, moving, best.id);
+      if (val === undefined) return;                         // answer pending: keep the sign as it is
+    }
     if (currentLimit === undefined || val === currentLimit) { limitPend = val; limitPendN = 0; showLimit(val); return; }
     // a different value must win two fixes in a row before the sign changes (no flicker at junctions)
     if (val === limitPend) limitPendN++; else { limitPend = val; limitPendN = 1; }
@@ -179,7 +221,10 @@
     var now = Date.now();
     var off = limitCache ? distM(limitCache.lat, limitCache.lon, lat, lon) : Infinity;
     if (limitCache && off < 450) pickLimit(lat, lon, moving);
-    else if (limitCache && off >= 480) showLimit(null);          // road list too far behind to trust
+    else if (limitCache ? off >= 480 : limitFails > 0) {          // road list stale, or OSM servers failing: TomTom or "?"
+      var tv = ttFallback(lat, lon, moving, undefined);
+      if (tv !== undefined && (tv != null || limitCache)) showLimit(tv);
+    }
     var wait = Math.min(30000, LIMIT_MIN_INTERVAL_MS * Math.pow(2, limitFails));
     if (queryBusy || off < LIMIT_REFETCH_M || now - lastQuery.time < wait) return;
     queryBusy = true;
@@ -485,7 +530,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 33</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 34</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
