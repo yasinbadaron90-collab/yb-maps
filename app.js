@@ -485,7 +485,7 @@
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 32</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 33</p>';
     resultsEl.appendChild(box);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
@@ -524,13 +524,42 @@
   // tapping the map hides the settings panel
   map.on('click', function () { if (resultsEl.querySelector('.settings')) resultsEl.innerHTML = ''; });
 
-  // Press and hold the map to drop a destination pin
+  // Press and hold the map to drop a pin: then choose to save it as a place or drive there
+  var pinMarker = null, pinPt = null, pinWasEditing = false;
+  var pinIcon = L.divIcon({ className: 'pin-icon', html: '<div>📍</div>', iconSize: [34, 34], iconAnchor: [17, 32] });
+  function clearPin() { if (pinMarker) { map.removeLayer(pinMarker); pinMarker = null; } pinPt = null; }
+  function closePin(restoreBar) {          // pin and its panel away; a running route is left alone
+    var had = !!pinMarker;
+    clearPin();
+    if (had && resultsEl.querySelector('.pin-panel')) resultsEl.innerHTML = '';
+    if (had && restoreBar) { editingTrip = pinWasEditing; syncBarMode(); }
+  }
   map.on('contextmenu', function (e) {
-    toPt = e.latlng;
-    toEl.value = 'Dropped pin';
+    if (!pinMarker) pinWasEditing = editingTrip;
+    clearPin();
+    pinPt = e.latlng;                       // toPt (the live destination) is only set when Go here is tapped
+    pinMarker = L.marker(e.latlng, { icon: pinIcon, interactive: false, keyboard: false }).addTo(map);
+    editingTrip = true; syncBarMode();      // the choices show in the results area, which is folded while a route shows
     resultsEl.innerHTML = '';
-    go();
+    var box = document.createElement('div');
+    box.className = 'namer pin-panel';
+    box.innerHTML =
+      '<p class="state">Dropped pin · ' + e.latlng.lat.toFixed(5) + ', ' + e.latlng.lng.toFixed(5) + '</p>' +
+      '<div class="srow pin-acts"><button id="pin-save" type="button">⭐ Save place</button>' +
+      '<button id="pin-go" type="button">🧭 Go here</button>' +
+      '<button id="pin-x" type="button" class="btn2" aria-label="Cancel">✕</button></div>';
+    resultsEl.appendChild(box);
+    var at = e.latlng;
+    document.getElementById('pin-save').addEventListener('click', function () {
+      showNamePicker(at.lat, at.lng, '', function () { closePin(true); });
+    });
+    document.getElementById('pin-go').addEventListener('click', function () {
+      toPt = at; toEl.value = 'Dropped pin';
+      go();
+    });
+    document.getElementById('pin-x').addEventListener('click', function () { closePin(true); });
   });
+  toEl.addEventListener('input', function () { closePin(false); });
 
   // Quick "near me" buttons
   var NEARBY = [
@@ -555,7 +584,7 @@
   }
 
   // Ask what to call a place, then save it
-  function showNamePicker(lat, lon, hint) {
+  function showNamePicker(lat, lon, hint, onSaved) {
     resultsEl.innerHTML = '';
     var box = document.createElement('div');
     box.className = 'namer';
@@ -578,6 +607,7 @@
       var name = input.value.trim();
       if (!name) { input.focus(); return; }
       savePlace(name, lat, lon);
+      if (onSaved) onSaved();
       placeSaved(name);
     });
   }
@@ -745,6 +775,7 @@
   }
 
   function go() {
+    clearPin();
     unlockSpeech();
     var fromText = fromEl.value.trim();
     var toText = toEl.value.trim();
@@ -1317,6 +1348,7 @@
 
   clearEl.addEventListener('click', function () {
     clearRoute();
+    closePin(false);
     resetStops();
     toPt = null; toEl.value = '';
     fromPt = null; fromEl.value = MY_LOC;

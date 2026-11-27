@@ -193,6 +193,10 @@ html, body {
 .namer { padding: 8px 2px 4px; border-top: 1px solid #1e293b; color: #e2e8f0; font-size: 14px; }
 .namer .state { margin: 0 0 8px; font-weight: 700; }
 .namer .srow { display: flex; gap: 8px; }
+.namer .pin-acts button { flex: 1; white-space: nowrap; padding: 0 8px; }
+.namer .pin-acts button.btn2 { flex: none; }
+.pin-icon { background: none; border: none; }
+.pin-icon div { font-size: 30px; line-height: 34px; text-align: center; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
 .namer input { flex: 1; }
 .res-right { display: flex; align-items: center; gap: 4px; flex: none; }
 .bar .saved-del { background: none; color: #94a3b8; font-size: 18px; padding: 0 10px; height: 34px; }
@@ -225,8 +229,9 @@ html, body {
 
 /* ---- heading-up map: box size/position are set from app.js ---- */
 #map.rot { touch-action: none; transition: transform 0.4s linear; }
-.cam-icon > div, .stop-icon > div, .route-label > div { transform: rotate(calc(var(--mr, 0) * 1deg)); }
-#map.rot .cam-icon > div, #map.rot .stop-icon > div, #map.rot .route-label > div { transition: transform 0.4s linear; }
+.pin-icon > div { transform-origin: 50% 94%; }
+.cam-icon > div, .stop-icon > div, .route-label > div, .pin-icon > div { transform: rotate(calc(var(--mr, 0) * 1deg)); }
+#map.rot .cam-icon > div, #map.rot .stop-icon > div, #map.rot .route-label > div, #map.rot .pin-icon > div { transition: transform 0.4s linear; }
 
 /* ---- stops (pickups) ---- */
 .stopnum { width: 20px; height: 20px; border-radius: 50%; flex: none; margin: 0 1px; background: #f59e0b; color: #0f172a; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; }
