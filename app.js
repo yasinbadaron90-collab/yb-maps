@@ -118,8 +118,9 @@
   var queryBusy = false;
   var currentLimit;                // undefined until the first limit is known
 
-  function showLimit(val) {
+  function showLimit(val, guess) {
     currentLimit = val;
+    limitEl.classList.toggle('guess', !!guess && val != null);
     if (val == null) {
       limitValEl.textContent = '?';
       limitEl.classList.add('unknown');
@@ -183,7 +184,7 @@
           ttLimit = { lat: lat, lon: lon, way: wayId, val: ad ? parseTtLimit(ad.speedLimit) : null };
           var at = lastLatLng || { lat: lat, lng: lon };
           if (limitCache && distM(limitCache.lat, limitCache.lon, at.lat, at.lng) < 450) pickLimit(at.lat, at.lng, moving);
-          else if (!limitCache && ttLimit.val != null) showLimit(ttLimit.val);
+          else if (!limitCache && ttLimit.val != null) { limitGuess = false; showLimit(ttLimit.val); }
         })
         .catch(function () { ttFails = Math.min(ttFails + 1, 4); })
         .then(function () { ttBusy = false; });
@@ -192,7 +193,7 @@
   }
 
   var limitCache = null;           // {lat, lon, ways}
-  var limitFails = 0, limitPend = undefined, limitPendN = 0;
+  var limitFails = 0, limitPend = undefined, limitPendN = 0, limitGuess = false;
   var ROAD_RE = '^(' + Object.keys(DRIVABLE).join('|') + ')$';
   // moving = true: ignore roads running across our heading (side streets, junction crossings)
   // The number for a road: maxspeed, else the direction-specific one, else the legal default named in
@@ -209,6 +210,28 @@
     if (v == null) v = parseMaxspeed(t['source:maxspeed']);
     return v;
   }
+  // ---------- Your own limits (typed in while parked) and the K53 / National Road Traffic Regulations defaults ----------
+  var LIMOV_KEY = 'yb-maps-limits', FLAGS_KEY = 'yb-maps-flags';
+  function lsGet(k, d) { try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  // Law (reg. 292): 60 in an urban area, 100 outside one, 120 on a freeway. Used only when OSM and TomTom have no number.
+  // Urban or not is judged from how many streets sit around you; shown as a dashed sign so you know it is the general rule.
+  var URBAN_STREETS = { residential: 1, living_street: 1, unclassified: 1, tertiary: 1 };   // not 'service': farmyards and petrol stations sit on rural roads too
+  function legalDefault(tags, lat, lon) {
+    var h = tags.highway;
+    if (h === 'motorway' || h === 'motorway_link') return 120;
+    if (h === 'residential' || h === 'living_street' || h === 'service') return 60;
+    var n = 0;
+    if (limitCache) limitCache.ways.forEach(function (w) {
+      if (!URBAN_STREETS[w.tags.highway] || n >= 8) return;
+      for (var i = 0; i < w.geometry.length; i++) {
+        if (distM(lat, lon, w.geometry[i].lat, w.geometry[i].lon) < 250) { n++; return; }
+      }
+    });
+    return n >= 8 ? 60 : 100;
+  }
+  var curWay = null;               // the road the sign is currently reading from {id, name}
+
   function pickLimit(lat, lon, moving) {
     var p = { lat: lat, lon: lon }, best = null, bestD = 30, bestB = 0;
     limitCache.ways.forEach(function (w) {
@@ -221,17 +244,21 @@
         bestD = d; best = w; bestB = b;
       }
     });
-    if (!best) return;                       // no road close by (GPS drift): keep what is showing
-    var val = wayLimit(best.tags, moving ? angDiff(bestB, heading) < 90 : null);
+    if (!best) { curWay = null; return; }    // no road close by (GPS drift): keep what is showing, but flag/fix nothing
+    var cand = { id: best.id, name: best.tags.name || best.tags.ref || 'this road' };
+    var guess = false;
+    var ov = lsGet(LIMOV_KEY, {})[best.id];
+    var val = ov != null ? ov : wayLimit(best.tags, moving ? angDiff(bestB, heading) < 90 : null);
     if (val === undefined) return;                           // one-way-only limits and we are not moving: keep the sign
     if (val == null) {                                       // OSM has no limit here: ask TomTom (once per road stretch)
       val = ttFallback(lat, lon, moving, best.id);
       if (val === undefined) return;                         // answer pending: keep the sign as it is
+      if (val == null) { val = legalDefault(best.tags, lat, lon); guess = true; }
     }
-    if (currentLimit === undefined || val === currentLimit) { limitPend = val; limitPendN = 0; showLimit(val); return; }
+    if (currentLimit === undefined || (val === currentLimit && guess === limitGuess)) { limitPend = val; limitPendN = 0; limitGuess = guess; curWay = cand; showLimit(val, guess); return; }
     // a different value must win two fixes in a row before the sign changes (no flicker at junctions)
     if (val === limitPend) limitPendN++; else { limitPend = val; limitPendN = 1; }
-    if (limitPendN >= 2) showLimit(val);
+    if (limitPendN >= 2) { limitGuess = guess; curWay = cand; showLimit(val, guess); }
   }
   function lookupLimit(lat, lon, moving) {
     var now = Date.now();
@@ -239,7 +266,8 @@
     if (limitCache && off < 450) pickLimit(lat, lon, moving);
     else if (limitCache ? off >= 480 : limitFails > 0) {          // road list stale, or OSM servers failing: TomTom or "?"
       var tv = ttFallback(lat, lon, moving, undefined);
-      if (tv !== undefined && (tv != null || limitCache)) showLimit(tv);
+      curWay = null;
+      if (tv !== undefined && (tv != null || limitCache)) { limitGuess = false; showLimit(tv); }
     }
     var wait = Math.min(30000, LIMIT_MIN_INTERVAL_MS * Math.pow(2, limitFails));
     if (queryBusy || off < LIMIT_REFETCH_M || now - lastQuery.time < wait) return;
@@ -298,6 +326,8 @@
 
   var MY_LOC = 'My location';
   var hereEl = document.getElementById('here');
+  var lastKmh = null, lastFixT = 0;
+  function isStopped() { return lastKmh != null && lastKmh < 5 && Date.now() - lastFixT < 5000; }   // unknown counts as moving
   var lastLatLng = null;       // latest GPS fix
   var fromPt = null;           // null = use my GPS position
   var toPt = null;
@@ -529,6 +559,67 @@
     osmSearch(text, onPick);
   }
 
+  // Tap the sign: moving = one-tap flag for later (no typing while driving); stopped = type the real limit.
+  function flashStatus(t) { setStatus(t); setTimeout(function () { if (!gpsStatus) setStatus(''); }, 2500); }
+  function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  limitEl.addEventListener('click', function () {
+    if (!isStopped()) {
+      if (!curWay) { flashStatus('No road found here'); return; }
+      var fl = lsGet(FLAGS_KEY, []).filter(function (f) { return f.way !== curWay.id; });
+      fl.push({ way: curWay.id, name: curWay.name, lat: lastLatLng ? lastLatLng.lat : null, lon: lastLatLng ? lastLatLng.lng : null, t: Date.now() });
+      lsSet(FLAGS_KEY, fl);
+      flashStatus('Flagged ' + curWay.name + '. Fix it when you park.');
+      return;
+    }
+    showLimitPanel();
+  });
+  var limPanelOpen = false;
+  function closeLimitPanel() { limPanelOpen = false; if (resultsEl.querySelector('.namer .lim-tag')) resultsEl.innerHTML = ''; }
+  function showLimitPanel() {
+    if (!isStopped()) return;      // typing is locked while moving or when the speed is unknown
+    limPanelOpen = true;
+    editingTrip = true; syncBarMode();
+    resultsEl.innerHTML = '';
+    var box = document.createElement('div');
+    box.className = 'namer';
+    var ov = lsGet(LIMOV_KEY, {}), fl = lsGet(FLAGS_KEY, []);
+    var rows = [];
+    if (curWay && !fl.some(function (f) { return f.way === curWay.id; })) rows.push({ way: curWay.id, name: curWay.name + ' (here)' });
+    fl.slice().reverse().forEach(function (f) { rows.push({ way: f.way, name: f.name, flagged: true }); });
+    var html = '<p class="state lim-tag">Road speed limits (saved on this phone)</p>';
+    if (!rows.length) html += '<p>No roads yet. While driving, tap the sign to flag a road, then fix it here when parked.</p>';
+    rows.forEach(function (r, i) {
+      html += '<div class="srow" style="margin-bottom:8px;align-items:center"><span style="flex:1">' + esc(r.name) + '</span>' +
+        '<input data-i="' + i + '" type="number" inputmode="numeric" min="5" max="130" placeholder="--" style="width:64px;text-align:center" value="' + (ov[r.way] != null ? ov[r.way] : '') + '">' +
+        '<button data-s="' + i + '" type="button">Save</button>' +
+        (ov[r.way] != null ? '<button data-r="' + i + '" type="button" class="btn2">Remove</button>' : '') + '</div>';
+    });
+    box.innerHTML = html;
+    resultsEl.appendChild(box);
+    // re-read the sign only if the changed road is the one under us; if no road can be found, show "?" rather than the removed number
+    function resetSign(way) {
+      if (!curWay || curWay.id !== way) return;
+      limitPend = undefined; currentLimit = undefined;
+      if (lastLatLng && limitCache) pickLimit(lastLatLng.lat, lastLatLng.lng, false);
+      if (currentLimit === undefined) { limitGuess = false; showLimit(null); }
+    }
+    function done() { showLimitPanel(); }
+    box.addEventListener('click', function (e) {
+      var si = e.target.getAttribute && e.target.getAttribute('data-s'), ri = e.target.getAttribute && e.target.getAttribute('data-r');
+      if (!isStopped()) { closeLimitPanel(); return; }
+      if (si != null) {
+        var r = rows[+si], n = parseInt(box.querySelector('input[data-i="' + si + '"]').value, 10);
+        if (!(n >= 5 && n <= 130)) return;
+        var o = lsGet(LIMOV_KEY, {}); o[r.way] = n; lsSet(LIMOV_KEY, o);
+        lsSet(FLAGS_KEY, lsGet(FLAGS_KEY, []).filter(function (f) { return f.way !== r.way; }));
+        resetSign(r.way); done();
+      } else if (ri != null) {
+        var r2 = rows[+ri], o2 = lsGet(LIMOV_KEY, {}); delete o2[r2.way]; lsSet(LIMOV_KEY, o2);
+        resetSign(r2.way); done();
+      }
+    });
+  }
+
   function showSettings() {
     // tap the cog again to hide the panel
     if (resultsEl.querySelector('.settings')) { resultsEl.innerHTML = ''; return; }
@@ -545,9 +636,11 @@
         '<button id="keysave" type="button">Save</button></div>' +
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
+      '<div class="srow" style="margin-top:8px"><button id="limpanel" type="button" class="btn2">🚩 Road speed limits (' + lsGet(FLAGS_KEY, []).length + ' flagged)</button></div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 37</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 38</p>';
     resultsEl.appendChild(box);
+    document.getElementById('limpanel').addEventListener('click', showLimitPanel);
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
       var open = kp.classList.toggle('hidden') === false;
@@ -1697,6 +1790,8 @@
     // speed: m/s -> km/h
     var kmh = (c.speed != null && !isNaN(c.speed)) ? Math.round(c.speed * 3.6) : null;
     speedEl.textContent = kmh == null ? '--' : kmh;
+    lastKmh = kmh; lastFixT = Date.now();
+    if (limPanelOpen && !isStopped()) closeLimitPanel();
 
     // heading: GPS heading when moving, else bearing from last position, else keep
     var moving = c.speed != null && c.speed >= HEADING_MIN_SPEED;
@@ -1737,6 +1832,7 @@
     var msg = err.code === 1 ? 'Location blocked. Allow location for this site.'
             : err.code === 2 ? 'No GPS signal'
             : 'GPS timeout, retrying…';
+    lastKmh = null;
     gpsStatus = true;
     setStatus(msg, err.code === 1);
   }

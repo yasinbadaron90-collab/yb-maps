@@ -145,6 +145,8 @@ html, body {
 .speed-unit { font-size: 8px; margin-top: 1px; color: #94a3b8; font-weight: 600; }
 
 .limit-sign {
+  pointer-events: auto;
+  cursor: pointer;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -164,6 +166,7 @@ html, body {
 }
 .limit-sign.three span { font-size: 15px; }
 .limit-sign.unknown { border-color: #94a3b8; }
+.limit-sign.guess { border-style: dashed; }
 .limit-sign.unknown span { color: #64748b; }
 
 /* Arrow marker */
