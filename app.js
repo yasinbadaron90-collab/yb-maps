@@ -20,10 +20,26 @@
   var map = L.map('map', { zoomControl: false, attributionControl: true })
     .setView(DEFAULT_CENTER, 17);
 
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-  }).addTo(map);
+  // Base map: CARTO Voyager when a (free) CARTO key is saved, else plain OpenStreetMap
+  var CARTO_KEY = 'yb-maps-carto-key';
+  var baseLayer = null;
+  function cartoKey() { try { return localStorage.getItem(CARTO_KEY) || ''; } catch (e) { return ''; } }
+  function setBase() {
+    var k = cartoKey();
+    if (baseLayer) map.removeLayer(baseLayer);
+    baseLayer = k
+      ? L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=' + encodeURIComponent(k), {
+          subdomains: 'abcd', maxZoom: 20,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        })
+      : L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        });
+    baseLayer.addTo(map);
+    baseLayer.bringToBack();
+  }
+  setBase();
 
   var statusEl = document.getElementById('status');
   var speedEl = document.getElementById('speed');
@@ -636,11 +652,29 @@
         '<button id="keysave" type="button">Save</button></div>' +
         (has ? '<div class="srow" style="margin-top:8px"><button id="keyoff" type="button" class="btn2">Turn off and remove key</button></div>' : '') +
       '</div>' +
+      '<div class="srow" style="margin-top:8px"><button id="styletoggle" type="button" class="btn2">🗺 Map style key (' + (cartoKey() ? 'Voyager ON' : 'OFF') + ') ▸</button></div>' +
+      '<div id="stylepanel" class="hidden">' +
+        '<p>Gives the cleaner CARTO Voyager map. Free key, no account: carto.com/basemaps/apikey. Paste it here. It stays on this phone.</p>' +
+        '<div class="srow"><input id="stylein" type="password" placeholder="Paste CARTO key" autocomplete="off">' +
+        '<button id="stylesave" type="button">Save</button></div>' +
+        (cartoKey() ? '<div class="srow" style="margin-top:8px"><button id="styleoff" type="button" class="btn2">Back to standard map</button></div>' : '') +
+      '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="limpanel" type="button" class="btn2">🚩 Road speed limits (' + lsGet(FLAGS_KEY, []).length + ' flagged)</button></div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 38</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 39</p>';
     resultsEl.appendChild(box);
     document.getElementById('limpanel').addEventListener('click', showLimitPanel);
+    document.getElementById('styletoggle').addEventListener('click', function () { document.getElementById('stylepanel').classList.toggle('hidden'); });
+    document.getElementById('stylesave').addEventListener('click', function () {
+      var v = document.getElementById('stylein').value.trim();
+      if (!v) return;
+      try { localStorage.setItem(CARTO_KEY, v); } catch (e) {}
+      setBase();
+      resultsEl.innerHTML = '<div class="msg">Saved. Voyager map is on.</div>';
+      setTimeout(function () { if (!resultsEl.querySelector('.settings')) resultsEl.innerHTML = ''; }, 2500);
+    });
+    var so = document.getElementById('styleoff');
+    if (so) so.addEventListener('click', function () { try { localStorage.removeItem(CARTO_KEY); } catch (e) {} setBase(); resultsEl.innerHTML = ''; });
     var kp = document.getElementById('keypanel'), kt = document.getElementById('keytoggle');
     kt.addEventListener('click', function () {
       var open = kp.classList.toggle('hidden') === false;

@@ -44,6 +44,7 @@ Plain HTML, CSS and JavaScript. Leaflet (saved in `vendor/`, not loaded from a C
 |---|---|---|
 | OpenStreetMap tiles | The map picture | No |
 | Overpass (3 servers, tried in turn) | Speed limit and speed cameras | No |
+| CARTO Voyager tiles (`basemaps.cartocdn.com`, needs free key) | Base map when a key is saved | Yes |
 | TomTom reverse geocode (`returnSpeedLimit`) | Speed limit where OSM has none (needs the TomTom key; sends the position) | Yes |
 | Nominatim | Place search | No |
 | OSRM (with a backup server) | Free routes | No |
@@ -60,6 +61,7 @@ Every one of these sees the phone's position when it is used. Public servers hav
 | `yb-maps-cams` | Cached speed-camera list |
 | `yb-maps-muted` | Voice on or off |
 | `yb-maps-traffic` | Traffic overlay on or off |
+| `yb-maps-carto-key` | Free CARTO key (carto.com/basemaps/apikey). Present = Voyager base map (`setBase`), absent = standard OSM tiles |
 | `yb-maps-limits` | Your own speed limits `{osmWayId: km/h}`, typed in while parked; beat OSM/TomTom |
 | `yb-maps-flags` | Roads flagged with one tap while driving, to fix later |
 | `yb-maps-headup` | Compass choice: `1` = turn the map to the driving direction (default: north-up, so street names are always upright) |
