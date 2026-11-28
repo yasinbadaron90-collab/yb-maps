@@ -38,7 +38,10 @@
         });
     baseLayer.addTo(map);
     baseLayer.bringToBack();
+    var fa = document.getElementById('attrib');
+    if (fa) fa.innerHTML = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' + (k ? ' &copy; <a href="https://carto.com/attributions">CARTO</a>' : '');
   }
+  map.attributionControl.setPrefix(false);   // the "Leaflet" credit is not required; keeps the line short
   setBase();
 
   var statusEl = document.getElementById('status');
@@ -661,7 +664,7 @@
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="limpanel" type="button" class="btn2">🚩 Road speed limits (' + lsGet(FLAGS_KEY, []).length + ' flagged)</button></div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 39</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 40</p>';
     resultsEl.appendChild(box);
     document.getElementById('limpanel').addEventListener('click', showLimitPanel);
     document.getElementById('styletoggle').addEventListener('click', function () { document.getElementById('stylepanel').classList.toggle('hidden'); });
