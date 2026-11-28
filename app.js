@@ -664,7 +664,7 @@
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="limpanel" type="button" class="btn2">🚩 Road speed limits (' + lsGet(FLAGS_KEY, []).length + ' flagged)</button></div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 41</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 42</p>';
     resultsEl.appendChild(box);
     document.getElementById('limpanel').addEventListener('click', showLimitPanel);
     document.getElementById('styletoggle').addEventListener('click', function () { document.getElementById('stylepanel').classList.toggle('hidden'); });
@@ -1111,7 +1111,7 @@
 
   function navStart(rt) {
     steps = null;
-    if (!routeFromGps || !rt.legs) { navEl.classList.add('hidden'); return; }
+    if (!routeFromGps || !rt.legs) { navEl.classList.add('hidden'); document.getElementById('nav-then').classList.add('hidden'); return; }
     var list = [];
     rt.legs.forEach(function (leg) {
       (leg.steps || []).forEach(function (s) {
@@ -1137,7 +1137,7 @@
         vi++;
       }
     });
-    if (list.length < 2) { navEl.classList.add('hidden'); return; }
+    if (list.length < 2) { navEl.classList.add('hidden'); document.getElementById('nav-then').classList.add('hidden'); return; }
     steps = list;
     stepIdx = 1;
     said = {};
@@ -1147,7 +1147,7 @@
   }
   function navReset() {
     steps = null;
-    navEl.classList.add('hidden');
+    navEl.classList.add('hidden'); document.getElementById('nav-then').classList.add('hidden');
     try { window.speechSynthesis.cancel(); } catch (e) {}
   }
   function navRender(d) {
@@ -1155,6 +1155,10 @@
     navIconEl.textContent = turnIcon(st);
     navDistEl.textContent = d == null ? '' : (st.type === 'arrive' ? fmtDist(d) : fmtDist(d));
     navTextEl.textContent = stepPhrase(st);
+    var nx = st.type === 'arrive' ? null : steps[stepIdx + 1];
+    var thenEl = document.getElementById('nav-then');
+    thenEl.textContent = nx && nx.type !== 'stop' ? 'Then ' + turnIcon(nx) : '';
+    thenEl.classList.toggle('hidden', !thenEl.textContent);
   }
   function navUpdate(lat, lon) {
     if (!steps || stepIdx >= steps.length) return;

@@ -107,7 +107,7 @@ html, body {
 .status {
   position: fixed;
   top: auto;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 130px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 144px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
@@ -124,13 +124,13 @@ html, body {
 
 .card {
   position: fixed;
-  left: calc(env(safe-area-inset-left, 0px) + 12px);
   right: calc(env(safe-area-inset-right, 0px) + 12px);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);   /* leaves room for the map credit line underneath */
   z-index: 1000;
   display: flex;
+  flex-direction: column;          /* km/h gauge on top, limit sign underneath, both on the right */
   align-items: flex-end;
-  justify-content: space-between;
+  gap: 8px;
   pointer-events: none;
   color: #fff;
 }
@@ -207,7 +207,7 @@ html, body {
 #keypanel.hidden { display: none; }
 
 .traffic-btn {
-  position: fixed; right: 12px; bottom: 200px; z-index: 1100;
+  position: fixed; right: 12px; bottom: 148px; z-index: 1100;
   width: 48px; height: 48px; border-radius: 50%; border: 2px solid #475569;
   background: rgba(15, 23, 42, 0.94); font-size: 22px; padding: 0; line-height: 1;
   box-shadow: 0 4px 14px rgba(0,0,0,0.35);
@@ -221,12 +221,12 @@ html, body {
 }
 .route-label div.sel { background: #2563eb; color: #fff; border-color: #fff; }
 
-.recenter-btn { bottom: 260px; }
-.compass-btn { bottom: 320px; }
+.recenter-btn { bottom: 208px; }
+.compass-btn { bottom: 268px; }
 .compass-btn svg { width: 28px; height: 28px; display: block; margin: auto; transition: transform 0.4s linear; }
 
 /* the map's own credit line turns with the map, so a fixed copy is shown while it is turned */
-.attrib { position: fixed; left: auto; right: 8px; transform: none; bottom: calc(env(safe-area-inset-bottom, 0px) + 68px); z-index: 1000; padding: 1px 6px; font: 10px/12px system-ui, sans-serif; color: #334155; background: rgba(255,255,255,0.8); border-radius: 6px; white-space: nowrap; }
+.attrib { position: fixed; left: auto; right: 8px; transform: none; bottom: 0; z-index: 1000; padding: 1px 6px; font: 10px/12px system-ui, sans-serif; color: #334155; background: rgba(255,255,255,0.8); border-radius: 6px 6px 0 0; white-space: nowrap; }
 .attrib a { color: #1d4ed8; }
 #map.rot .leaflet-control-attribution { display: none; }
 
@@ -251,11 +251,11 @@ html, body {
     max-height: calc(100vh - 16px);
     overflow-y: auto;
   }
-  .status { left: auto; right: calc(env(safe-area-inset-right, 0px) + 10px); transform: none; bottom: calc(env(safe-area-inset-bottom, 0px) + 124px); }
+  .status { left: auto; right: calc(env(safe-area-inset-right, 0px) + 10px); transform: none; bottom: calc(env(safe-area-inset-bottom, 0px) + 144px); }
   .traffic-btn, .recenter-btn { right: calc(env(safe-area-inset-right, 0px) + 12px); }
-  .traffic-btn { bottom: 170px; }
-  .recenter-btn { bottom: 226px; }
-  .compass-btn { bottom: 282px; }
+  .traffic-btn { bottom: 148px; }
+  .recenter-btn { bottom: 204px; }
+  .compass-btn { bottom: 260px; }
   .attrib { top: 0; bottom: auto; right: auto; left: calc(min(46vw, 440px) + 16px); transform: none; border-radius: 0 0 6px 6px; }
   #bar.driving ~ .attrib { left: 50%; right: auto; transform: translateX(-50%); }
 }
@@ -263,17 +263,32 @@ html, body {
 /* ---- while a route is showing: only the turn banner and trip row (✎ brings the boxes back) ---- */
 #bar.driving > .row, #bar.driving > #stops, #bar.driving > #results { display: none; }
 
-/* sideways and driving: turn banner + trip row sit at the bottom centre, between the two gauges */
+/* sideways and driving (like Google Maps): turn banner + "Then" top-left, trip bar bottom-left; km/h + limit stay on the right */
+.nav-then { display: none; }
 @media (orientation: landscape) and (max-height: 560px) {
   #bar.driving {
-    top: auto;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
     bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
-    left: 50%;
+    left: calc(env(safe-area-inset-left, 0px) + 8px);
     right: auto;
-    transform: translateX(-50%);
-    width: min(56vw, 520px);
+    transform: none;
+    width: min(46vw, 420px);
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+    display: flex;
+    flex-direction: column;
+    pointer-events: none;
+  }
+  #bar.driving > .nav { margin-top: 0; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); pointer-events: auto; }
+  #bar.driving > .nav-then:not(.hidden) {
+    display: block; align-self: flex-start; margin-top: -4px; padding: 6px 14px 3px;
+    background: #1d4ed8; color: #fff; font-size: 15px; font-weight: 700; border-radius: 0 0 12px 12px;
+  }
+  #bar.driving > .trip {
+    margin-top: auto; padding: 8px 10px; background: rgba(15, 23, 42, 0.94); border-radius: 14px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); pointer-events: auto;
   }
 }
-
-/* the map credit sits on the right, directly above the speed limit sign */
-.leaflet-bottom.leaflet-right { margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 68px); }
