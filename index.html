@@ -41,12 +41,12 @@
   </div>
   <div id="nav-then" class="nav-then hidden"></div>
   <div id="trip" class="trip hidden">
-    <span id="trip-text"></span>
+    <button id="clear" type="button" aria-label="Clear route">✕</button>
+    <span id="trip-text"><b id="trip-eta"></b><span id="trip-rest"></span><span id="trip-late"></span></span>
     <span class="trip-btns">
       <button id="edit-trip" type="button" aria-label="Change From, To or stops">✎</button>
       <button id="save-place" type="button" aria-label="Save this place">⭐</button>
       <button id="mute" type="button" aria-label="Voice on or off">🔊</button>
-      <button id="clear" type="button" aria-label="Clear route">✕</button>
     </span>
   </div>
 </div>
@@ -56,6 +56,15 @@
   <button id="traffic" class="traffic-btn hidden" type="button" aria-label="Live traffic on or off">🚦</button>
   <div id="attrib" class="attrib hidden">&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a></div>
   <div id="status" class="status">Waiting for GPS…</div>
+
+<div id="warn" class="warn hidden" role="alert">
+  <span class="warn-icon" aria-hidden="true">📷</span>
+  <span><b id="warn-title"></b><span id="warn-sub"></span></span>
+</div>
+<div id="undo" class="undo hidden">
+  <span>Route cleared</span>
+  <button id="undo-btn" type="button">Undo</button>
+</div>
 
 <div id="card" class="card">
   <div class="speed">

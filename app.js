@@ -151,22 +151,31 @@
     }
   }
 
+  // Every network call goes through this: the time limit covers the reply body too, so a hung connection always ends.
+  function fetchJson(url, ms, opts) {
+    var o = {}, k;
+    for (k in opts) o[k] = opts[k];
+    var outer = o.signal, ctl = new AbortController();
+    var abort = function () { ctl.abort(); };
+    var timer = setTimeout(abort, ms);
+    if (outer) { if (outer.aborted) abort(); else outer.addEventListener('abort', abort); }
+    o.signal = ctl.signal;
+    function done() { clearTimeout(timer); if (outer) outer.removeEventListener('abort', abort); }
+    return fetch(url, o).then(function (r) {
+      if (!r.ok) { var e = new Error('server ' + r.status); e.status = r.status; throw e; }
+      return r.json();
+    }).then(function (d) { done(); return d; }, function (e) { done(); throw e; });
+  }
+
   // Ask the OSM data servers in turn; the first good answer wins.
   function overpass(q, perServerMs) {
     function tryAt(i) {
       if (i >= OVERPASS_URLS.length) return Promise.reject(new Error('OSM data servers busy'));
-      var ctrl = new AbortController();
-      var t = setTimeout(function () { ctrl.abort(); }, perServerMs);
-      return fetch(OVERPASS_URLS[i], {
+      return fetchJson(OVERPASS_URLS[i], perServerMs, {
         method: 'POST',
         body: 'data=' + encodeURIComponent(q),
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        signal: ctrl.signal
-      }).then(function (r) {
-        clearTimeout(t);
-        if (!r.ok) throw new Error('Overpass ' + r.status);
-        return r.json();
-      }).catch(function () { clearTimeout(t); return tryAt(i + 1); });
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      }).catch(function () { return tryAt(i + 1); });
     }
     return tryAt(0);
   }
@@ -184,7 +193,7 @@
     if (!isFinite(n) || n <= 0) return null;
     return Math.round(/MPH/i.test(m[2] || '') ? n * 1.609344 : n);
   }
-  // number = TomTom's limit, null = no limit known / no key, undefined = asking right now (keep what the sign shows)
+  // number = TomTom's limit, null = no limit known / no key / TomTom failing, undefined = asking right now
   function ttFallback(lat, lon, moving, wayId) {
     var key = getKey();
     if (!key) return null;
@@ -196,19 +205,20 @@
       var url = 'https://api.tomtom.com/search/2/reverseGeocode/' + lat.toFixed(6) + ',' + lon.toFixed(6) +
         '.json?key=' + encodeURIComponent(key) + '&returnSpeedLimit=true&radius=30' +
         (moving ? '&heading=' + Math.round(heading) : '');
-      fetch(url).then(function (r) { if (!r.ok) throw new Error('TomTom ' + r.status); return r.json(); })
+      fetchJson(url, 6000)
         .then(function (d) {
           ttFails = 0;
           var ad = d && d.addresses && d.addresses[0] && d.addresses[0].address;
           ttLimit = { lat: lat, lon: lon, way: wayId, val: ad ? parseTtLimit(ad.speedLimit) : null };
+          if (gpsStatus) return;       // GPS lost while we waited: leave the sign on "?"
           var at = lastLatLng || { lat: lat, lng: lon };
           if (limitCache && distM(limitCache.lat, limitCache.lon, at.lat, at.lng) < 450) pickLimit(at.lat, at.lng, moving);
-          else if (!limitCache && ttLimit.val != null) { limitGuess = false; showLimit(ttLimit.val); }
+          else if (!limitCache) { limitGuess = false; showLimit(ttLimit.val); }
         })
         .catch(function () { ttFails = Math.min(ttFails + 1, 4); })
         .then(function () { ttBusy = false; });
     }
-    return ttBusy ? undefined : null;
+    return ttBusy && !ttFails ? undefined : null;   // after a failure, don't wait on retries
   }
 
   var limitCache = null;           // {lat, lon, ways}
@@ -271,10 +281,12 @@
     if (val === undefined) return;                           // one-way-only limits and we are not moving: keep the sign
     if (val == null) {                                       // OSM has no limit here: ask TomTom (once per road stretch)
       val = ttFallback(lat, lon, moving, best.id);
-      if (val === undefined) return;                         // answer pending: keep the sign as it is
-      if (val == null) { val = legalDefault(best.tags, lat, lon); guess = true; }
+      if (val === undefined) {                               // answer pending
+        if (curWay && curWay.id === best.id) return;         // same road as the sign: keep it
+        val = null;                                          // a different road: show "?", never the old road's number
+      } else if (val == null) { val = legalDefault(best.tags, lat, lon); guess = true; }
     }
-    if (currentLimit === undefined || (val === currentLimit && guess === limitGuess)) { limitPend = val; limitPendN = 0; limitGuess = guess; curWay = cand; showLimit(val, guess); return; }
+    if (currentLimit == null || (val === currentLimit && guess === limitGuess)) { limitPend = val; limitPendN = 0; limitGuess = guess; curWay = cand; showLimit(val, guess); return; }
     // a different value must win two fixes in a row before the sign changes (no flicker at junctions)
     if (val === limitPend) limitPendN++; else { limitPend = val; limitPendN = 1; }
     if (limitPendN >= 2) { limitGuess = guess; curWay = cand; showLimit(val, guess); }
@@ -286,7 +298,11 @@
     else if (limitCache ? off >= 480 : limitFails > 0) {          // road list stale, or OSM servers failing: TomTom or "?"
       var tv = ttFallback(lat, lon, moving, undefined);
       curWay = null;
-      if (tv !== undefined && (tv != null || limitCache)) { limitGuess = false; showLimit(tv); }
+      if (tv !== undefined) {
+        limitGuess = false; showLimit(tv);
+      } else if (!(ttLimit && ttLimit.way === undefined && distM(ttLimit.lat, ttLimit.lon, lat, lon) < 300)) {
+        limitGuess = false; showLimit(null);             // waiting, and nothing recent to go on
+      }
     }
     var wait = Math.min(30000, LIMIT_MIN_INTERVAL_MS * Math.pow(2, limitFails));
     if (queryBusy || off < LIMIT_REFETCH_M || now - lastQuery.time < wait) return;
@@ -304,6 +320,7 @@
             return w.geometry && w.tags && DRIVABLE[w.tags.highway];
           })
         };
+        if (gpsStatus) return;
         var at = lastLatLng || { lat: lat, lng: lon };
         pickLimit(at.lat, at.lng, moving);
       })
@@ -330,7 +347,6 @@
   var goEl = document.getElementById('go');
   var resultsEl = document.getElementById('results');
   var tripEl = document.getElementById('trip');
-  var tripTextEl = document.getElementById('trip-text');
   var clearEl = document.getElementById('clear');
   // While a route is showing, fold the From/To boxes away (like Google) so the map stays visible; ✎ opens them again
   var barEl = document.getElementById('bar');
@@ -359,6 +375,7 @@
   var routeIdx = 0;            // where we are along routePts
   var tripFrac = 1;            // share of the route still to drive (1 = all)
   var routeFromGps = true;
+  var routeInputs = null;       // {toText, fromText, fromPt} as they were when the route was made
   var offSince = 0, lastReroute = 0, routing = false;
   var pauseFollowUntil = 0;
   var resetZoom = false;
@@ -405,8 +422,12 @@
     var dur = rt.duration * tripFrac;
     var eta = new Date(Date.now() + dur * 1000);
     var hh = ('0' + eta.getHours()).slice(-2) + ':' + ('0' + eta.getMinutes()).slice(-2);
-    tripTextEl.textContent = fmtTrip(rt.distance * tripFrac, dur, (rt.delay || 0) * tripFrac) +
-      ' · ' + hh + (n ? ' · 📍' + n : '');
+    var m = rt.distance * tripFrac, delay = (rt.delay || 0) * tripFrac;
+    var km = m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
+    var late = [delay >= 60 ? '+' + Math.round(delay / 60) + ' min traffic' : '', n ? '📍' + n : ''].filter(Boolean).join(' ');
+    document.getElementById('trip-eta').textContent = hh;
+    document.getElementById('trip-rest').textContent = fmtDur(dur) + ' · ' + km;
+    document.getElementById('trip-late').textContent = late;
   }
 
   var leftDest = false;           // with stops: only "arrived" once we have moved away from where we started or from the destination
@@ -425,10 +446,6 @@
   function shortName(r) {
     var parts = String(r.display_name || '').split(',');
     return parts.slice(0, 2).join(',').trim();
-  }
-
-  function fmtDist(m) {
-    return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
   }
 
   function showResults(list, onPick) {
@@ -474,8 +491,7 @@
       url += '&viewbox=' + (b.lng - d) + ',' + (b.lat + d) + ',' + (b.lng + d) + ',' + (b.lat - d);
       if (bounded) url += '&bounded=1';
     }
-    return fetch(url, { headers: { 'Accept': 'application/json' } })
-      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+    return fetchJson(url, 8000, { headers: { 'Accept': 'application/json' } });
   }
 
   // Nearest first. Looks within ~30 km of me, widens if nothing is found.
@@ -530,10 +546,7 @@
         url += '&lat=' + lastLatLng.lat + '&lon=' + lastLatLng.lng;
         if (withRadius) url += '&radius=60000';
       }
-      return fetch(url).then(function (r) {
-        if (!r.ok) { var e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
-        return r.json();
-      }).then(function (d) { return d.results || []; });
+      return fetchJson(url, 8000).then(function (d) { return d.results || []; });
     }
     // TomTom misses some places OSM has (and the other way round), so ask both and merge.
     var osmList = nominatim(text, !!lastLatLng)
@@ -664,7 +677,7 @@
       '</div>' +
       '<div class="srow" style="margin-top:8px"><button id="limpanel" type="button" class="btn2">🚩 Road speed limits (' + lsGet(FLAGS_KEY, []).length + ' flagged)</button></div>' +
       '<div class="srow" style="margin-top:8px"><button id="refresh" type="button" class="btn2">🔄 Refresh app (get latest version)</button></div>' +
-      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 42</p>';
+      '<p class="state" style="margin-top:8px;font-size:13px;font-weight:400">App version 43</p>';
     resultsEl.appendChild(box);
     document.getElementById('limpanel').addEventListener('click', showLimitPanel);
     document.getElementById('styletoggle').addEventListener('click', function () { document.getElementById('stylepanel').classList.toggle('hidden'); });
@@ -922,6 +935,7 @@
   }
 
   function addStop() {
+    dropUndo();
     if (stops.length >= MAX_STOPS) { flash('Up to ' + MAX_STOPS + ' stops', true, 3000); return; }
     var row = document.createElement('div');
     row.className = 'row stop-row';
@@ -934,7 +948,7 @@
     var s = { row: row, input: row.querySelector('input'), num: row.querySelector('.stopnum'), pt: null, done: false };
     stops.push(s);
     renumberStops();
-    s.input.addEventListener('input', function () { s.pt = null; s.done = false; });
+    s.input.addEventListener('input', function () { s.pt = null; s.done = false; dropUndo(); });
     s.input.addEventListener('focus', function () { if (!s.input.value.trim()) showStopPlaces(s); });
     s.input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { s.input.blur(); go(); } });
     row.querySelector('.s-save').addEventListener('click', function () {
@@ -966,6 +980,7 @@
   }
 
   function go() {
+    dropUndo();
     clearPin();
     unlockSpeech();
     var fromText = fromEl.value.trim();
@@ -1000,9 +1015,9 @@
   }
   hereEl.addEventListener('click', useMyLocation);
   fromEl.addEventListener('focus', function () { if (fromEl.value === MY_LOC) fromEl.select(); });
-  fromEl.addEventListener('input', function () { fromPt = null; });
+  fromEl.addEventListener('input', function () { fromPt = null; dropUndo(); });
   toEl.addEventListener('focus', showNearbyChips);
-  toEl.addEventListener('input', function () { toPt = null; });
+  toEl.addEventListener('input', function () { toPt = null; dropUndo(); });
   goEl.addEventListener('click', go);
   [fromEl, toEl].forEach(function (el) {
     el.addEventListener('keydown', function (e) { if (e.key === 'Enter') { el.blur(); go(); } });
@@ -1012,14 +1027,6 @@
     var min = Math.round(s / 60);
     return min >= 60 ? Math.floor(min / 60) + ' h ' + (min % 60) + ' min' : Math.max(1, min) + ' min';
   }
-  function fmtTrip(m, s, delay) {
-    var km = m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
-    var t = km + ' · ' + fmtDur(s);
-    if (delay >= 60) t += ' (+' + Math.round(delay / 60) + ' min traffic)';
-    return t;
-  }
-
-
   // ---------- Turn-by-turn ----------
   var navEl = document.getElementById('nav');
   var navIconEl = document.getElementById('nav-icon');
@@ -1109,7 +1116,7 @@
     return m >= 1000 ? (m / 1000).toFixed(1) + ' kilometres' : (Math.round(m / 10) * 10) + ' metres';
   }
 
-  function navStart(rt) {
+  function navStart(rt, noUpdate) {
     steps = null;
     if (!routeFromGps || !rt.legs) { navEl.classList.add('hidden'); document.getElementById('nav-then').classList.add('hidden'); return; }
     var list = [];
@@ -1143,7 +1150,7 @@
     said = {};
     navEl.classList.remove('hidden');
     navRender(null);
-    if (lastLatLng) navUpdate(lastLatLng.lat, lastLatLng.lng);
+    if (lastLatLng && !noUpdate) navUpdate(lastLatLng.lat, lastLatLng.lng);
   }
   function navReset() {
     steps = null;
@@ -1224,15 +1231,7 @@
     var lastErr = 'no answer';
     function tryServer(i) {
       if (i >= OSRM_SERVERS.length) return Promise.reject(new Error(lastErr));
-      var ctl = new AbortController();
-      var timer = setTimeout(function () { ctl.abort(); }, 10000);
-      signal.addEventListener('abort', function () { ctl.abort(); });
-      return fetch(OSRM_SERVERS[i] + tail, { signal: ctl.signal })
-        .then(function (r) {
-          clearTimeout(timer);
-          if (!r.ok) throw new Error('server ' + r.status);
-          return r.json();
-        })
+      return fetchJson(OSRM_SERVERS[i] + tail, 10000, { signal: signal })
         .then(function (data) {
           if (data.code !== 'Ok' || !data.routes || !data.routes.length) {
             throw new Error(data.code || 'no route');
@@ -1242,7 +1241,6 @@
           return r0;
         })
         .catch(function (err) {
-          clearTimeout(timer);
           if (signal.aborted) throw err;
           lastErr = (err && err.name === 'AbortError') ? 'timed out' : (err && err.message) || 'failed';
           return tryServer(i + 1);
@@ -1327,20 +1325,11 @@
       '/json?key=' + encodeURIComponent(key) +
       '&traffic=true&routeType=fastest&travelMode=car&computeTravelTimeFor=all&sectionType=traffic&instructionsType=text&language=en-GB' +
       '&maxAlternatives=' + (alts && !via.length ? 2 : 0);
-    var ctl = new AbortController();
-    var timer = setTimeout(function () { ctl.abort(); }, 10000);
-    signal.addEventListener('abort', function () { ctl.abort(); });
-    return fetch(url, { signal: ctl.signal })
-      .then(function (r) {
-        clearTimeout(timer);
-        if (!r.ok) throw new Error('TomTom ' + r.status);
-        return r.json();
-      })
+    return fetchJson(url, 10000, { signal: signal })
       .then(function (d) {
         if (!d.routes || !d.routes.length) throw new Error('no route');
         return d.routes.map(fromTomTom).filter(function (x) { return x.geometry.coordinates.length > 1; });
-      })
-      .catch(function (e) { clearTimeout(timer); throw e; });
+      });
   }
 
   // Routes to offer. With a TomTom key: live-traffic fastest + alternatives. Otherwise (or if TomTom fails): free OSRM.
@@ -1361,6 +1350,24 @@
     setStatus(text, isError);
     setTimeout(function () { if (statusEl.textContent === text) setStatus(''); }, ms || 6000);
   }
+
+  // Big banner for warnings, placed under the top bar (sideways: right of the turn banner, see style.css)
+  var warnEl = document.getElementById('warn'), warnTimer = null;
+  function placeWarn() {
+    if (warnEl.classList.contains('hidden')) return;
+    var side = window.matchMedia('(orientation: landscape) and (max-height: 560px)').matches;
+    var under = barEl.getBoundingClientRect().bottom + 8;
+    warnEl.style.top = side ? '' : Math.min(under, window.innerHeight * 0.55) + 'px';
+  }
+  function showWarn(title, sub) {
+    document.getElementById('warn-title').textContent = title;
+    document.getElementById('warn-sub').textContent = sub;
+    warnEl.classList.remove('hidden');
+    placeWarn();
+    clearTimeout(warnTimer);
+    warnTimer = setTimeout(function () { warnEl.classList.add('hidden'); }, 7000);
+  }
+  window.addEventListener('resize', placeWarn);
 
   function routeTag(rt) {
     return fmtDur(rt.duration) + (rt.delay >= 60 ? ' · +' + Math.round(rt.delay / 60) : '');
@@ -1434,7 +1441,7 @@
   }
 
   // Make the chosen route the active one: path for off-route checks, voice steps, trip text
-  function applyRoute() {
+  function applyRoute(noNavUpdate) {
     var rt = routeOpts[routeSel];
     routePts = rt.geometry.coordinates.map(function (c) { return { lat: c[1], lon: c[0] }; });
     routeCum = [0];
@@ -1443,7 +1450,7 @@
     }
     routeIdx = 0;
     tripFrac = 1;
-    navStart(rt);
+    navStart(rt, noNavUpdate);
     setTripText();
     tripEl.classList.remove('hidden');
     syncBarMode();
@@ -1466,7 +1473,10 @@
     clearRoute();
     keepTraffic = false;
     routeViaS = viaS || [];
-    if (mode === 'new') { leftDest = false; routeStartPt = lastLatLng || a; editingTrip = false; }
+    if (mode === 'new') {
+      leftDest = false; routeStartPt = lastLatLng || a; editingTrip = false;
+      routeInputs = { toText: toEl.value, fromText: fromEl.value, fromPt: fromPt };
+    }
     routeOpts = routes;
     routeSel = 0;
     endMarker = L.marker(b, { icon: endIcon, interactive: false, keyboard: false }).addTo(map);
@@ -1535,32 +1545,120 @@
     var viaNow = viaNowS.map(function (s) { return s.pt; });
     fetchTomTomRoutes(here, dest, ctl.signal, false, key, viaNow).then(function (rs) {
       if (!routePts || toPt !== dest || routing || !rs.length) return;
-      var left = Math.max(0, routeBaseDur - (Date.now() - routeBaseAt) / 1000);
+      if (viaList().length !== viaNowS.length) return;      // a stop was reached or removed while we asked
+      var left = routeBaseDur * tripFrac;                   // share of the route still to drive, not time on the clock
       var saved = left - rs[0].duration;
       if (saved >= 120) showRoutes(rs, here, dest, 'faster', saved, viaNowS);
     }).catch(function () {});
   }
 
+  // After Undo: move past any turns driven while the route was cleared (stops are never skipped)
+  function skipPassedSteps() {
+    var k = 0;
+    for (var j = 0; j < steps.length - 1; j++) {
+      var best = k, bestD = Infinity;
+      for (var i = k; i < routePts.length; i++) {      // steps are in route order: first close match onwards
+        var d = distM(steps[j].lat, steps[j].lon, routePts[i].lat, routePts[i].lon);
+        if (d < bestD) { bestD = d; best = i; }
+        if (bestD < 15 && d > bestD + 30) break;
+      }
+      k = best;
+      if (j < stepIdx) continue;
+      if (steps[j].type === 'stop' || k >= routeIdx) return;
+      stepIdx = j + 1; said = {};
+    }
+  }
+
+  // ✕ can be undone for 8 s. The route is kept in memory, so Undo works without signal.
+  var undoEl = document.getElementById('undo'), undoData = null, undoTimer = null;
+  function dropUndo() {
+    undoData = null;
+    clearTimeout(undoTimer);
+    undoEl.classList.add('hidden');
+  }
+  function cancelRouting() {      // a route still being fetched must not come back after ✕
+    if (routeCtl) routeCtl.abort();
+    routeCtl = null; routing = false;
+  }
+  document.getElementById('undo-btn').addEventListener('click', function () {
+    var u = undoData;
+    if (!u) return;
+    dropUndo();
+    cancelRouting();
+    closePin(false);
+    resetStops();
+    resultsEl.innerHTML = '';
+    routeInputs = u.inputs;
+    toPt = u.toPt; toEl.value = u.inputs.toText;
+    fromPt = u.inputs.fromPt; fromEl.value = u.inputs.fromText;
+    u.stops.forEach(function (s) { stopsEl.appendChild(s.row); stops.push(s); });
+    renumberStops();
+    routeFromGps = u.fromGps; routeViaS = u.viaS; leftDest = u.leftDest; routeStartPt = u.startPt;
+    routeOpts = u.opts; routeSel = u.sel; routeIdx = 0; tripFrac = 1;
+    endMarker = L.marker(u.toPt, { icon: endIcon, interactive: false, keyboard: false }).addTo(map);
+    if (u.startAt) {
+      startMarker = L.circleMarker(u.startAt, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
+    }
+    editingTrip = false;
+    drawStopMarkers();
+    renderRoutes();
+    applyRoute(true);
+    routeIdx = u.idx; tripFrac = u.frac;      // carry on from where we were on the route
+    trimRouteLine();
+    setTripText();
+    if (u.steps && steps) {
+      steps = u.steps; stepIdx = u.stepIdx; said = u.said;
+      if (lastLatLng && routeFromGps) {
+        updateProgress(lastLatLng.lat, lastLatLng.lng);
+        skipPassedSteps();
+      }
+      navRender(null);
+      if (lastLatLng) navUpdate(lastLatLng.lat, lastLatLng.lng);
+    }
+    // no reroute here: the chosen route stays; if the car has left it, the normal off-route check reroutes
+    applyRotation();
+  });
+
   clearEl.addEventListener('click', function () {
+    var keep = routePts && endMarker && routeInputs ? {
+      toPt: endMarker.getLatLng(), inputs: routeInputs, startAt: startMarker ? startMarker.getLatLng() : null,
+      stops: stops.slice(), fromGps: routeFromGps, viaS: routeViaS, leftDest: leftDest, startPt: routeStartPt,
+      opts: routeOpts, sel: routeSel, idx: routeIdx, frac: tripFrac, steps: steps, stepIdx: stepIdx, said: said
+    } : null;
+    cancelRouting();
+    setStatus(gpsStatus ? statusEl.textContent : '');
     clearRoute();
     closePin(false);
     resetStops();
     toPt = null; toEl.value = '';
     fromPt = null; fromEl.value = MY_LOC;
+    dropUndo();
+    if (keep) {
+      undoData = keep;
+      undoEl.classList.remove('hidden');
+      undoTimer = setTimeout(dropUndo, 8000);
+    }
   });
 
   // km and time left shrink as we drive (nearest point ahead of where we last were)
   function updateProgress(lat, lon) {
     if (!routePts || !routeCum || routePts.length < 2) return;
     var best = -1, bestD = Infinity;
-    function scan(from, to) {
+    function scan(from, to, firstMatch) {
       for (var i = from; i <= to; i++) {
         var d = distM(lat, lon, routePts[i].lat, routePts[i].lon);
         if (d < bestD) { bestD = d; best = i; }
+        else if (firstMatch && bestD < 40 && d > bestD + 60) break;   // stop before the same road comes round again
       }
     }
-    scan(Math.max(0, routeIdx - 10), Math.min(routePts.length - 1, routeIdx + 400));
-    if (bestD > 200) scan(0, routePts.length - 1);   // after a GPS gap we may be far ahead: look at the whole route
+    // nearby first, measured in metres along the route, so one bad fix cannot jump to the same road on the way back
+    var hi = routeIdx;
+    while (hi < routePts.length - 1 && (hi < routeIdx + 2 || routeCum[hi] - routeCum[routeIdx] < 300)) hi++;
+    scan(routeIdx, hi);                                       // forwards first (wins ties)
+    var lo = routeIdx;
+    while (lo > 0 && (lo > routeIdx - 2 || routeCum[routeIdx] - routeCum[lo] < 150)) lo--;
+    if (bestD > 40) scan(lo, routeIdx - 1);
+    if (bestD > 80) scan(0, routePts.length - 1, true);       // after a GPS gap: look at the whole route
     if (best < 0 || bestD > 200) return;          // off the route: a reroute will reset this
     routeIdx = best;
     if (routeIdx - lastTrimIdx >= 3 || routeIdx < lastTrimIdx) trimRouteLine();
@@ -1670,8 +1768,7 @@
       camWarned[c.id] = true;
       var lim = c.max != null ? c.max : currentLimit;
       var slow = lim != null && kmh != null && kmh > lim + 3;
-      var text = 'Speed camera ahead · ' + (Math.round(d / 50) * 50) + ' m' + (slow ? ' · slow down' : '');
-      flash(text, true, 7000);
+      showWarn('Speed camera ahead', (Math.round(d / 50) * 50) + ' m' + (slow ? ' · slow down' : ''));
       speak('Speed camera ahead' + (slow ? ', slow down' : ''));
       try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) {}
     });
@@ -1867,6 +1964,7 @@
     checkRoute(c.latitude, c.longitude);
     trafficRefresh(c.latitude, c.longitude);
     navUpdate(c.latitude, c.longitude);
+    placeWarn();
   }
 
   function onError(err) {
@@ -1875,6 +1973,10 @@
             : 'GPS timeout, retrying…';
     lastKmh = null;
     gpsStatus = true;
+    speedEl.textContent = '--';                // never leave an old speed or limit on screen
+    curWay = null; limitPend = undefined; limitPendN = 0; limitGuess = false;
+    showLimit(null);
+    closeLimitPanel();
     setStatus(msg, err.code === 1);
   }
 
