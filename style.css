@@ -126,7 +126,7 @@ html, body {
   position: fixed;
   left: calc(env(safe-area-inset-left, 0px) + 12px);
   right: calc(env(safe-area-inset-right, 0px) + 12px);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);   /* sits above the map credit line */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
   z-index: 1000;
   display: flex;
   align-items: flex-end;
@@ -226,7 +226,7 @@ html, body {
 .compass-btn svg { width: 28px; height: 28px; display: block; margin: auto; transition: transform 0.4s linear; }
 
 /* the map's own credit line turns with the map, so a fixed copy is shown while it is turned */
-.attrib { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; z-index: 1000; padding: 1px 6px; font: 10px/12px system-ui, sans-serif; color: #334155; background: rgba(255,255,255,0.8); border-radius: 6px 6px 0 0; white-space: nowrap; }
+.attrib { position: fixed; left: auto; right: 8px; transform: none; bottom: calc(env(safe-area-inset-bottom, 0px) + 68px); z-index: 1000; padding: 1px 6px; font: 10px/12px system-ui, sans-serif; color: #334155; background: rgba(255,255,255,0.8); border-radius: 6px; white-space: nowrap; }
 .attrib a { color: #1d4ed8; }
 #map.rot .leaflet-control-attribution { display: none; }
 
@@ -256,8 +256,8 @@ html, body {
   .traffic-btn { bottom: 170px; }
   .recenter-btn { bottom: 226px; }
   .compass-btn { bottom: 282px; }
-  .attrib { top: 0; bottom: auto; left: calc(min(46vw, 440px) + 16px); transform: none; border-radius: 0 0 6px 6px; }
-  #bar.driving ~ .attrib { left: 50%; transform: translateX(-50%); }
+  .attrib { top: 0; bottom: auto; right: auto; left: calc(min(46vw, 440px) + 16px); transform: none; border-radius: 0 0 6px 6px; }
+  #bar.driving ~ .attrib { left: 50%; right: auto; transform: translateX(-50%); }
 }
 
 /* ---- while a route is showing: only the turn banner and trip row (✎ brings the boxes back) ---- */
@@ -274,3 +274,6 @@ html, body {
     width: min(56vw, 520px);
   }
 }
+
+/* the map credit sits on the right, directly above the speed limit sign */
+.leaflet-bottom.leaflet-right { margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 68px); }
